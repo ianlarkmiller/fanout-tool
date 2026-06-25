@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Secrets — never commit keys
+.env
+.streamlit/secrets.toml
+
+# Caches / artifacts
+*.npz
+.pytest_cache/
+.DS_Store
