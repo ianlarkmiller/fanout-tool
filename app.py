@@ -122,12 +122,10 @@ est = cost.estimate(
     modeled_base=modeled_base, n_personas=n_personas, do_patterns=do_patterns, do_briefs=do_briefs,
 )
 st.info(
-    f"**Estimated API cost: ~\\${est['total']:.2f}** for {max(len(queries),1)} "
-    f"quer{'y' if len(queries)==1 else 'ies'} × {runs} runs. "
-    f"This is a rough estimate of what the AI providers (OpenAI / Google) will charge to **your own "
-    f"API keys** for this run — the tool itself is free and never charges you anything. "
-    f"Breakdown: elicited \\${est['elicited']:.2f} · modeled \\${est['modeled']:.2f} · "
-    f"PATTERNS \\${est['patterns']:.3f} · BRIEFS \\${est['briefs']:.2f}."
+    f"**Estimated API cost: ~\\${est['total']:.2f}** for {max(len(queries), 1)} "
+    f"quer{'y' if max(len(queries), 1) == 1 else 'ies'} × {runs} runs. "
+    f"This is a rough estimate of what the AI providers (OpenAI, Anthropic, Google) will charge to "
+    f"**your own API keys** for this run — the tool itself is free and never charges you anything."
 )
 
 
