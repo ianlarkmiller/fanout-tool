@@ -30,7 +30,6 @@ ENGINE_DISPLAY = {"openai": "OpenAI", "gemini": "Gemini", "anthropic": "Anthropi
 
 # ---------------------------------------------------------------- sidebar ----
 with st.sidebar:
-    st.header("What to run")
     st.markdown("**Elicit live fan-outs from:**")
     st.caption("The real sub-queries each engine searches — slower and pricier; needs that engine's key. "
                "One fixed model per provider.")
@@ -73,13 +72,17 @@ with st.sidebar:
     gemini_key = st.text_input(_klabel("Google Gemini", need_gemini), type="password")
     anthropic_key = st.text_input(_klabel("Anthropic", need_anthropic), type="password")
 
-    st.divider()
-    st.caption("Made by [Ian Lark Miller](https://www.linkedin.com/in/ian-l-miller) · SEO & AI search")
-
 keys = {"openai": openai_key, "gemini": gemini_key, "anthropic": anthropic_key}
 
 # ----------------------------------------------------------------- header ----
 st.title("Query fan-out tool")
+st.markdown(
+    '<span style="color:#6b7280;font-size:0.9rem;">Made by Ian Miller</span> '
+    '<a href="https://www.linkedin.com/in/ian-l-miller" target="_blank" title="Ian Miller on LinkedIn">'
+    '<img src="https://cdn.simpleicons.org/linkedin/0A66C2" width="16" '
+    'style="vertical-align:text-bottom;"></a>',
+    unsafe_allow_html=True,
+)
 st.caption(
     "Model the sub-queries an AI search engine fans a question into (optionally per buyer persona), "
     "pool repeated runs, and get a deterministic entity analysis + a writer's brief — every angle and "
