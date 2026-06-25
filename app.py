@@ -41,7 +41,7 @@ with st.sidebar:
     modeled_personas = st.checkbox("Modeled fan-out (with personas)", value=False,
                                    help="Predict the fan-out for specific buyer personas.")
     model_engine = "gemini"  # modeling is fixed to the validated model (the prompt was tuned on Flash)
-    st.caption(f"Modeled fan-outs use {model.MODELS['gemini']} (the model this prompt was built for).")
+    st.caption(f"Modeled fan-outs use {model.MODELS['gemini']}.")
 
     runs = int(st.number_input(
         "Runs per query", min_value=1, max_value=20, value=5,
