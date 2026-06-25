@@ -23,6 +23,10 @@ MODELED_PERSONA_PER_RUN = 0.011   # each persona
 PATTERNS_PER_QUERY = 0.001        # cold embeddings; ~free once cached within a session
 BRIEFS_PER_QUERY = 0.05           # typical; the widest pooled pages run up to ~0.15
 
+# Rough per-step DURATIONS in seconds (measured 2026-06-25) — used to pace the progress bar so it
+# tracks the real work. elicit_run = one engine, one run; model_run = one modeled run.
+STEP_SECONDS = {"elicit_run": 33.0, "model_run": 10.0, "patterns": 3.0, "brief": 50.0}
+
 
 def estimate(
     *,

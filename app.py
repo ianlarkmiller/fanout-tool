@@ -99,9 +99,6 @@ st.caption("⚙️ Your API keys and run options are in the sidebar — if it is
 queries_text = st.text_area("Queries (one per line)", height=110,
                             placeholder="what's the best way to get out of credit card debt?")
 queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
-if "anthropic" in elicited_engines:
-    st.caption("⚠️ Claude (Anthropic) caps web searches at 20 per run, so its elicited fan-out can be "
-               "truncated on broad queries.")
 
 # --------------------------------------------------------------- personas ----
 if modeled_personas:
@@ -193,9 +190,9 @@ def _run_warnings(label: str, runs_list: list) -> None:
                    f"(kept the {ok} that worked)")
 
 
-def _run_step(fn, prog, start, end) -> Any:
-    """Run blocking fn() in a worker thread while creeping the progress bar from `start` toward `end`,
-    so the bar never stalls during a long call. Returns fn()'s result; re-raises any error it threw."""
+def _run_step(fn, prog, start, end, expected_s) -> Any:
+    """Run blocking fn() in a worker thread, advancing the bar from `start` to `end` LINEARLY over
+    ~expected_s (paced to the real work), then snap to `end` when it finishes. Re-raises fn()'s error."""
     holder = {}
 
     def work():
@@ -206,12 +203,12 @@ def _run_step(fn, prog, start, end) -> Any:
 
     t = threading.Thread(target=work, daemon=True)
     t.start()
-    pct = start
-    ceiling = max(start, end - 0.01)  # don't reach the segment end until the work actually finishes
+    t0 = time.time()
+    ceiling = max(start, end - 0.005)  # don't quite reach the segment end until the work finishes
     while t.is_alive():
-        time.sleep(0.4)
-        pct = min(pct + (ceiling - pct) * 0.025 + 0.0015, ceiling)  # ease slowly toward ceiling, keep inching
-        prog.progress(min(pct, 1.0))
+        time.sleep(0.3)
+        frac = min((time.time() - t0) / max(expected_s, 1.0), 1.0)
+        prog.progress(min(start + (ceiling - start) * frac, ceiling))
     t.join()
     prog.progress(min(end, 1.0))
     if "error" in holder:
@@ -229,10 +226,14 @@ if st.button("▶ Run", type="primary"):
         results = []
         cache: dict = {}
         n_pers_run = sum(1 for p in personas if assemble(p.get("fields", {})))
-        steps_per_q = ((1 if elicited_engines else 0) + (1 if modeled_base else 0) + n_pers_run
-                       + (1 if do_patterns else 0) + (1 if do_briefs else 0))
-        total = max(steps_per_q * len(queries), 1)
-        done = 0
+        S = cost.STEP_SECONDS
+        per_q_s = ((len(elicited_engines) * runs * S["elicit_run"])
+                   + (runs * S["model_run"] if modeled_base else 0.0)
+                   + (n_pers_run * runs * S["model_run"])
+                   + (S["patterns"] if do_patterns else 0.0)
+                   + (S["brief"] if do_briefs else 0.0))
+        total_s = max(per_q_s * len(queries), 1.0)
+        elapsed = 0.0  # planned seconds consumed so far — drives the bar position
         prog = st.progress(0.0)
         with st.status("Running… this can take a while — keep this tab open.", expanded=True) as status:
             for q in queries:
@@ -241,18 +242,23 @@ if st.button("▶ Run", type="primary"):
                 try:
                     if elicited_engines:
                         st.write(f"  · eliciting from {', '.join(elicited_engines)} ({runs} runs each)…")
+                        seg = len(elicited_engines) * runs * S["elicit_run"]
                         ecap = _run_step(lambda: elicit.elicit(q, elicited_engines, runs, keys),
-                                         prog, done / total, (done + 1) / total)
-                        done += 1
+                                         prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
+                        elapsed += seg
                         caps.append(ecap)
                         for eng, rec in ecap["engines"].items():
                             _run_warnings(f"{ENGINE_DISPLAY.get(eng, eng)} elicitation", rec["runs"])
+                            if any(r.get("truncated") for r in rec["runs"]):
+                                st.warning(f"⚠️ {ENGINE_DISPLAY.get(eng, eng)} hit its search cap on some runs — "
+                                           f"that fan-out may be truncated.")
                     if modeled_base:
                         st.write("  · modeling (no persona)…")
+                        seg = runs * S["model_run"]
                         mcap = _run_step(
                             lambda: model.model_one(q, None, model_engine, runs, keys[model_engine], None),
-                            prog, done / total, (done + 1) / total)
-                        done += 1
+                            prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
+                        elapsed += seg
                         caps.append(mcap)
                         _run_warnings("Modeled (no persona)", mcap["result"]["runs"])
                     if modeled_personas:
@@ -263,11 +269,12 @@ if st.button("▶ Run", type="primary"):
                             nm = p.get("name") or idx + 1
                             st.write(f"  · modeling persona '{nm}'…")
                             label = _slug(p.get("name", ""), idx)
+                            seg = runs * S["model_run"]
                             pcap = _run_step(
                                 lambda ptext=ptext, label=label: model.model_one(
                                     q, ptext, model_engine, runs, keys[model_engine], label),
-                                prog, done / total, (done + 1) / total)
-                            done += 1
+                                prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
+                            elapsed += seg
                             caps.append(pcap)
                             _run_warnings(f"Persona '{nm}' modeling", pcap["result"]["runs"])
                     pat = brf = None
@@ -280,21 +287,23 @@ if st.button("▶ Run", type="primary"):
                         st.error(f"❌ No fan-outs were captured for “{q}” — every selected source failed "
                                  f"(see the warnings above), so there's nothing to analyze. Check your keys/credits.")
                     if has_data and do_patterns:
+                        seg = S["patterns"]
                         try:
                             pat = _run_step(lambda: patterns.patterns_md(q, caps, keys["gemini"], cache),
-                                            prog, done / total, (done + 1) / total)
+                                            prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
                             st.write("  · PATTERNS done")
                         except Exception as exc:  # noqa: BLE001
                             st.error(f"❌ PATTERNS failed for “{q}” — {_friendly(exc)}")
-                        done += 1
+                        elapsed += seg
                     if has_data and do_briefs:
+                        seg = S["brief"]
                         try:
                             brf = _run_step(lambda: brief.brief_md(q, caps, keys["gemini"], keys["openai"], cache),
-                                            prog, done / total, (done + 1) / total)
+                                            prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
                             st.write("  · BRIEFS done")
                         except Exception as exc:  # noqa: BLE001
                             st.error(f"❌ BRIEFS failed for “{q}” — {_friendly(exc)}")
-                        done += 1
+                        elapsed += seg
                     results.append({"query": q, "captures": caps, "patterns": pat, "brief": brf})
                 except Exception as exc:  # noqa: BLE001 — backstop so one query can't kill the whole run
                     st.error(f"❌ “{q}” failed — {_friendly(exc)}")
