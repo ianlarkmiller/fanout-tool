@@ -1,6 +1,8 @@
-streamlit
-openai
-anthropic
-google-genai
-numpy
-scikit-learn
+# Pinned to the versions validated locally (Python 3.12) so the deploy build matches.
+# Bump deliberately; re-test the end-to-end run after any change.
+streamlit==1.58.0
+openai==1.109.1
+anthropic==0.111.0
+google-genai==2.9.0
+numpy==2.4.6
+scikit-learn==1.9.0
