@@ -40,11 +40,8 @@ with st.sidebar:
                                help="An LLM's prediction of the fan-out for an anonymous searcher.")
     modeled_personas = st.checkbox("Modeled fan-out (with personas)", value=False,
                                    help="Predict the fan-out for specific buyer personas.")
-    model_engine = st.selectbox(
-        "Model with", ["gemini", "openai", "anthropic"], index=0,
-        format_func=lambda e: f"{ENGINE_DISPLAY[e]} ({model.MODELS[e]})",
-        help="Which provider predicts the fan-outs — one fixed model per provider (shown in each option).",
-    )
+    model_engine = "gemini"  # modeling is fixed to the validated model (the prompt was tuned on Flash)
+    st.caption(f"Modeled fan-outs use {model.MODELS['gemini']} (the model this prompt was built for).")
 
     runs = int(st.number_input(
         "Runs per query", min_value=1, max_value=20, value=5,
@@ -78,8 +75,12 @@ st.title("Query fan-out tool")
 st.markdown(
     '<span style="color:#6b7280;font-size:0.9rem;">Made by Ian Miller</span> '
     '<a href="https://www.linkedin.com/in/ian-l-miller" target="_blank" title="Ian Miller on LinkedIn">'
-    '<img src="https://cdn.simpleicons.org/linkedin/0A66C2" width="16" '
-    'style="vertical-align:text-bottom;"></a>',
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="#0A66C2" '
+    'style="vertical-align:text-bottom;"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 '
+    '0-2.13 1.45-2.13 2.94v5.67H9.35V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 '
+    '5.45v6.29zM5.34 7.43a2.07 2.07 0 1 1 0-4.14 2.07 2.07 0 0 1 0 4.14zM7.12 20.45H3.56V9h3.56v11.45zM22.22 '
+    '0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 '
+    '0 22.22 0z"/></svg></a>',
     unsafe_allow_html=True,
 )
 st.caption(
