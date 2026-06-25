@@ -26,19 +26,26 @@ def _slug(name: str, idx: int) -> str:
     return s
 
 
+ENGINE_DISPLAY = {"openai": "OpenAI", "gemini": "Gemini", "anthropic": "Anthropic"}
+
 # ---------------------------------------------------------------- sidebar ----
 with st.sidebar:
     st.header("What to run")
     elicited_engines = st.multiselect(
         "Elicit live fan-outs from", ["openai", "gemini", "anthropic"], default=[],
-        help="The real sub-queries each engine searches. Slower and pricier; needs that engine's key.",
+        format_func=lambda e: f"{ENGINE_DISPLAY[e]} ({elicit.MODELS[e]})",
+        help="The real sub-queries each engine searches. Slower and pricier; needs that engine's key. "
+             "Each provider uses one fixed model (shown in the option).",
     )
     modeled_base = st.checkbox("Modeled fan-out (no persona)", value=True,
                                help="An LLM's prediction of the fan-out for an anonymous searcher.")
     modeled_personas = st.checkbox("Modeled fan-out (with personas)", value=False,
-                                   help="Predict the fan-out for specific buyer personas (defined below).")
-    model_engine = st.selectbox("Model with", ["gemini", "openai", "anthropic"], index=0,
-                                help="Which LLM generates the modeled fan-outs.")
+                                   help="Predict the fan-out for specific buyer personas.")
+    model_engine = st.selectbox(
+        "Model with", ["gemini", "openai", "anthropic"], index=0,
+        format_func=lambda e: f"{ENGINE_DISPLAY[e]} ({model.MODELS[e]})",
+        help="Which provider predicts the fan-outs — one fixed model per provider (shown in each option).",
+    )
 
     runs = int(st.number_input(
         "Runs per query", min_value=1, max_value=20, value=5,
@@ -83,7 +90,6 @@ queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
 # --------------------------------------------------------------- personas ----
 if modeled_personas:
     st.subheader("Buyer personas")
-    st.caption("Same six fields each time — that's what keeps personas comparable.")
     for idx, p in enumerate(st.session_state.personas):
         with st.expander(f"Persona {idx + 1}: {p.get('name') or 'unnamed'}", expanded=True):
             p["name"] = st.text_input("Persona name", value=p.get("name", ""), key=f"pname{idx}")
@@ -109,11 +115,12 @@ est = cost.estimate(
     modeled_base=modeled_base, n_personas=n_personas, do_patterns=do_patterns, do_briefs=do_briefs,
 )
 st.info(
-    f"**Rough cost estimate:** ~\\${est['total']:.2f} "
-    f"(elicited \\${est['elicited']:.2f} · modeled \\${est['modeled']:.2f} · "
-    f"PATTERNS \\${est['patterns']:.3f} · BRIEFS \\${est['briefs']:.2f}) "
-    f"for {max(len(queries),1)} quer{'y' if len(queries)==1 else 'ies'} × {runs} runs. "
-    f"You pay your own providers; this estimate uses measured per-run averages."
+    f"**Estimated API cost: ~\\${est['total']:.2f}** for {max(len(queries),1)} "
+    f"quer{'y' if len(queries)==1 else 'ies'} × {runs} runs. "
+    f"This is a rough estimate of what the AI providers (OpenAI / Google) will charge to **your own "
+    f"API keys** for this run — the tool itself is free and never charges you anything. "
+    f"Breakdown: elicited \\${est['elicited']:.2f} · modeled \\${est['modeled']:.2f} · "
+    f"PATTERNS \\${est['patterns']:.3f} · BRIEFS \\${est['briefs']:.2f}."
 )
 
 

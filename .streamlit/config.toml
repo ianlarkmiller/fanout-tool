@@ -2,5 +2,10 @@
 headless = true
 
 [theme]
+# Mirrors the personal site (ian-site/src/styles/global.css) so the tool and
+# ianlarkmiller.com share one palette. Keep the two in sync if either changes.
 base = "light"
-primaryColor = "#557c63"
+primaryColor = "#557c63"               # --accent (sage green)
+backgroundColor = "#ffffff"            # --bg
+secondaryBackgroundColor = "#f7f7f4"   # --bg-tint
+textColor = "#16181d"                  # --ink
