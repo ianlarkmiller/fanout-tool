@@ -8,6 +8,7 @@ import json
 import re
 import threading
 import time
+from typing import Any
 
 import streamlit as st
 
@@ -98,6 +99,9 @@ st.caption("⚙️ Your API keys and run options are in the sidebar — if it is
 queries_text = st.text_area("Queries (one per line)", height=110,
                             placeholder="what's the best way to get out of credit card debt?")
 queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
+if "anthropic" in elicited_engines:
+    st.caption("⚠️ Claude (Anthropic) caps web searches at 20 per run, so its elicited fan-out can be "
+               "truncated on broad queries.")
 
 # --------------------------------------------------------------- personas ----
 if modeled_personas:
@@ -175,7 +179,21 @@ def _friendly(err) -> str:
     return str(err)
 
 
-def _run_step(fn, prog, start, end):
+def _run_warnings(label: str, runs_list: list) -> None:
+    """Surface a warning if ANY run errored (not only when all of them did)."""
+    errs = [r["error"] for r in runs_list if "error" in r]
+    if not errs:
+        return
+    total = len(runs_list)
+    ok = total - len(errs)
+    if ok == 0:
+        st.warning(f"⚠️ {label} failed — all {total} run(s) errored — {_friendly(errs[0])}")
+    else:
+        st.warning(f"⚠️ {label}: {len(errs)} of {total} run(s) failed — {_friendly(errs[0])} "
+                   f"(kept the {ok} that worked)")
+
+
+def _run_step(fn, prog, start, end) -> Any:
     """Run blocking fn() in a worker thread while creeping the progress bar from `start` toward `end`,
     so the bar never stalls during a long call. Returns fn()'s result; re-raises any error it threw."""
     holder = {}
@@ -198,7 +216,7 @@ def _run_step(fn, prog, start, end):
     prog.progress(min(end, 1.0))
     if "error" in holder:
         raise holder["error"]
-    return holder.get("result")
+    return holder["result"]
 
 
 # -------------------------------------------------------------------- run ----
@@ -229,9 +247,7 @@ if st.button("▶ Run", type="primary"):
                         done += 1
                         caps.append(ecap)
                         for eng, rec in ecap["engines"].items():
-                            if not any("error" not in r for r in rec["runs"]):
-                                first = next((r["error"] for r in rec["runs"] if "error" in r), "")
-                                st.warning(f"⚠️ {ENGINE_DISPLAY.get(eng, eng)} elicitation failed — {_friendly(first)}")
+                            _run_warnings(f"{ENGINE_DISPLAY.get(eng, eng)} elicitation", rec["runs"])
                     if modeled_base:
                         st.write("  · modeling (no persona)…")
                         mcap = _run_step(
@@ -239,9 +255,7 @@ if st.button("▶ Run", type="primary"):
                             prog, done / total, (done + 1) / total)
                         done += 1
                         caps.append(mcap)
-                        if not any("error" not in r for r in mcap["result"]["runs"]):
-                            first = next((r["error"] for r in mcap["result"]["runs"] if "error" in r), "")
-                            st.warning(f"⚠️ Modeled (no persona) failed — {_friendly(first)}")
+                        _run_warnings("Modeled (no persona)", mcap["result"]["runs"])
                     if modeled_personas:
                         for idx, p in enumerate(personas):
                             ptext = assemble(p.get("fields", {}))
@@ -256,9 +270,7 @@ if st.button("▶ Run", type="primary"):
                                 prog, done / total, (done + 1) / total)
                             done += 1
                             caps.append(pcap)
-                            if not any("error" not in r for r in pcap["result"]["runs"]):
-                                first = next((r["error"] for r in pcap["result"]["runs"] if "error" in r), "")
-                                st.warning(f"⚠️ Persona '{nm}' modeling failed — {_friendly(first)}")
+                            _run_warnings(f"Persona '{nm}' modeling", pcap["result"]["runs"])
                     pat = brf = None
                     has_data = any(
                         ("engines" in c and any(r.get("queries") for rec in c["engines"].values()
