@@ -72,8 +72,8 @@ keys = {"openai": openai_key, "gemini": gemini_key, "anthropic": anthropic_key}
 
 # ----------------------------------------------------------------- header ----
 st.title("Query fan-out tool")
-st.markdown(
-    '<span style="color:#6b7280;font-size:0.9rem;">Made by Ian Miller</span> '
+st.caption(
+    'Made by Ian Miller '
     '<a href="https://www.linkedin.com/in/ian-l-miller" target="_blank" title="Ian Miller on LinkedIn">'
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="#0A66C2" '
     'style="vertical-align:text-bottom;"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 '
@@ -90,7 +90,7 @@ st.caption(
 )
 
 # ---------------------------------------------------------------- queries ----
-st.caption("⚙️ Your API keys and run options are in the sidebar — on mobile, tap the **›** at the "
+st.caption("⚙️ Your API keys and run options are in the sidebar — if it isn't visible, tap the ›› at the "
            "top-left to open it.")
 
 queries_text = st.text_area("Queries (one per line)", height=110,
@@ -126,7 +126,7 @@ est = cost.estimate(
 )
 st.markdown(
     f'<div style="background:#f7f7f4; border-left:3px solid #557c63; padding:0.7rem 1rem; '
-    f'border-radius:4px; margin:0.5rem 0; color:#2d2218; font-size:0.92rem;">'
+    f'border-radius:4px; margin:0.5rem 0; font-size:0.92rem;">'
     f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f}</strong> for {max(len(queries), 1)} '
     f'quer{"y" if max(len(queries), 1) == 1 else "ies"} &times; {runs} runs. '
     f'This is a rough estimate of what the AI providers (OpenAI, Anthropic, Google) will charge to '
