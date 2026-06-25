@@ -126,7 +126,7 @@ est = cost.estimate(
 )
 st.markdown(
     f'<div style="background:#f7f7f4; border-left:3px solid #557c63; padding:0.7rem 1rem; '
-    f'border-radius:4px; margin:0.5rem 0; color:#16181d; font-size:0.92rem;">'
+    f'border-radius:4px; margin:0.5rem 0; color:#2d2218; font-size:0.92rem;">'
     f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f}</strong> for {max(len(queries), 1)} '
     f'quer{"y" if max(len(queries), 1) == 1 else "ies"} &times; {runs} runs. '
     f'This is a rough estimate of what the AI providers (OpenAI, Anthropic, Google) will charge to '

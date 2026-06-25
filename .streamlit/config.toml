@@ -8,4 +8,4 @@ base = "light"
 primaryColor = "#557c63"               # --accent (sage green)
 backgroundColor = "#ffffff"            # --bg
 secondaryBackgroundColor = "#f7f7f4"   # --bg-tint
-textColor = "#16181d"                  # --ink
+textColor = "#2d2218"                  # very dark brown (Ian's pick; site --ink is #16181d — sync TBD)
