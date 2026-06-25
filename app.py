@@ -63,7 +63,7 @@ with st.sidebar:
     need_anthropic = ("anthropic" in elicited_engines) or (_using_modeled and model_engine == "anthropic")
 
     st.header("API keys")
-    st.caption("Used in memory for this run only — never logged or stored. Bring your own.")
+    st.caption("Used in memory for this run only — never logged or stored.")
 
     def _klabel(name: str, need: bool) -> str:
         return f"{name} API key" + (" — required" if need else " — not needed for current selections")
@@ -71,6 +71,9 @@ with st.sidebar:
     openai_key = st.text_input(_klabel("OpenAI", need_openai), type="password")
     gemini_key = st.text_input(_klabel("Google Gemini", need_gemini), type="password")
     anthropic_key = st.text_input(_klabel("Anthropic", need_anthropic), type="password")
+
+    st.divider()
+    st.caption("Made by [Ian Lark Miller](https://www.linkedin.com/in/ian-l-miller) · SEO & AI search")
 
 keys = {"openai": openai_key, "gemini": gemini_key, "anthropic": anthropic_key}
 
