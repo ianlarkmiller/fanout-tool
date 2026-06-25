@@ -90,7 +90,7 @@ st.caption(
 )
 
 # ---------------------------------------------------------------- queries ----
-st.caption("⚙️ Your API keys and run options are in the **sidebar** — on mobile, tap the **›** at the "
+st.caption("⚙️ Your API keys and run options are in the sidebar — on mobile, tap the **›** at the "
            "top-left to open it.")
 
 queries_text = st.text_area("Queries (one per line)", height=110,
