@@ -46,20 +46,26 @@ Validation:
 
 - ✅ Core logic ported faithfully (offline parity + end-to-end smoke on real APIs).
 - ✅ Modeled + PATTERNS + BRIEFS pipeline runs on real keys.
-- ✅ The Streamlit app **boots clean** under Streamlit's headless `AppTest` (no exceptions; title +
-  all widgets — Run button, checkboxes, query area, key inputs — build). Fixed a real bug found in
-  review: results `download_button` keys now use the result index (were `query[:20]`, which would
-  collide and crash Streamlit on similar queries). A full interactive click-through (enter keys +
-  click Run + inspect output) is the remaining manual check.
-- ⚠️ The **elicited** path is ported and unit-consistent with the captured data, but a live elicited
-  run (real engine web-search calls) hasn't been triggered from the app.
+- ✅ The Streamlit app is **validated headlessly end-to-end** via Streamlit's `AppTest`: it boots
+  clean (all widgets build), and driving the real Run path (keys → query → Run) on a *fresh* query
+  ("is debt settlement worth it?", not pre-captured) renders both a PATTERNS entity spine and a
+  BRIEFS brief with provenance tags — no exceptions. So the modeled → PATTERNS → BRIEFS flow works on
+  arbitrary queries through the actual UI code. Also fixed a real bug found in review: results
+  `download_button` keys now use the result index (were `query[:20]`, which would collide and crash
+  Streamlit on similar queries).
+- ⚠️ The **elicited** path is ported and offline-consistent with the captured data, but a *live*
+  elicited run (real engine web-search calls) hasn't been triggered from the app yet — only the
+  modeled path has been exercised live.
 
 ## Next
 
-1. `pip install -r requirements.txt` and `streamlit run app.py`; click through one modeled run.
-2. Error-handling polish (empty/invalid keys, API failures, quota) surfaced in the UI.
-3. Deploy to Streamlit Community Cloud or Hugging Face Spaces (free).
-4. Then drop the live link into the article where the tool is teased.
+1. Browser eyeball: `pip install -r requirements.txt` → `streamlit run app.py`; check layout, tabs,
+   and the download buttons render as expected.
+2. Trigger one live **elicited** run from the app (select an engine + its key) to exercise that path.
+3. Error-handling polish (invalid keys, API failures, quota) surfaced in the UI.
+4. **Deploy** to Streamlit Community Cloud or Hugging Face Spaces (free) — needs Ian's account to
+   connect the GitHub repo (OAuth), so this step waits on him.
+5. Then drop the live link into the article where the tool is teased.
 
 ## Run locally
 
