@@ -209,8 +209,8 @@ def _run_step(fn, prog, start, end) -> Any:
     pct = start
     ceiling = max(start, end - 0.01)  # don't reach the segment end until the work actually finishes
     while t.is_alive():
-        time.sleep(0.25)
-        pct = min(pct + (ceiling - pct) * 0.08 + 0.004, ceiling)  # ease toward ceiling, always inch forward
+        time.sleep(0.4)
+        pct = min(pct + (ceiling - pct) * 0.025 + 0.0015, ceiling)  # ease slowly toward ceiling, keep inching
         prog.progress(min(pct, 1.0))
     t.join()
     prog.progress(min(end, 1.0))
