@@ -30,13 +30,12 @@ ENGINE_DISPLAY = {"openai": "OpenAI", "gemini": "Gemini", "anthropic": "Anthropi
 
 # ---------------------------------------------------------------- sidebar ----
 with st.sidebar:
-    st.markdown("**Elicit live fan-outs from:**")
-    st.caption("The real sub-queries each engine searches — slower and pricier; needs that engine's key. "
-               "One fixed model per provider.")
-    elicited_engines = [
-        e for e in ["openai", "gemini", "anthropic"]
-        if st.checkbox(f"{ENGINE_DISPLAY[e]} ({elicit.MODELS[e]})", value=False, key=f"elicit_{e}")
-    ]
+    elicited_engines = st.multiselect(
+        "Elicit live fan-outs from", ["openai", "gemini", "anthropic"], default=[],
+        format_func=lambda e: f"{ENGINE_DISPLAY[e]} ({elicit.MODELS[e]})",
+        help="The real sub-queries each engine searches. Slower and pricier; needs that engine's key. "
+             "Each provider uses one fixed model (shown in the option).",
+    )
     modeled_base = st.checkbox("Modeled fan-out (no persona)", value=True,
                                help="An LLM's prediction of the fan-out for an anonymous searcher.")
     modeled_personas = st.checkbox("Modeled fan-out (with personas)", value=False,
