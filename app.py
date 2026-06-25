@@ -12,7 +12,7 @@ import streamlit as st
 from core import brief, cost, elicit, model, patterns
 from core.persona_fields import PERSONA_FIELDS, assemble
 
-st.set_page_config(page_title="Query fan-out tool", layout="wide")
+st.set_page_config(page_title="Query fan-out tool", layout="wide", initial_sidebar_state="expanded")
 
 # ---- session state ----
 st.session_state.setdefault("personas", [])
@@ -90,6 +90,9 @@ st.caption(
 )
 
 # ---------------------------------------------------------------- queries ----
+st.caption("⚙️ Your API keys and run options are in the **sidebar** — on mobile, tap the **›** at the "
+           "top-left to open it.")
+
 queries_text = st.text_area("Queries (one per line)", height=110,
                             placeholder="what's the best way to get out of credit card debt?")
 queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
@@ -121,11 +124,15 @@ est = cost.estimate(
     n_queries=max(len(queries), 1), runs=runs, elicited_engines=elicited_engines,
     modeled_base=modeled_base, n_personas=n_personas, do_patterns=do_patterns, do_briefs=do_briefs,
 )
-st.info(
-    f"**Estimated API cost: ~\\${est['total']:.2f}** for {max(len(queries), 1)} "
-    f"quer{'y' if max(len(queries), 1) == 1 else 'ies'} × {runs} runs. "
-    f"This is a rough estimate of what the AI providers (OpenAI, Anthropic, Google) will charge to "
-    f"**your own API keys** for this run — the tool itself is free and never charges you anything."
+st.markdown(
+    f'<div style="background:#f7f7f4; border-left:3px solid #557c63; padding:0.7rem 1rem; '
+    f'border-radius:4px; margin:0.5rem 0; color:#16181d; font-size:0.92rem;">'
+    f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f}</strong> for {max(len(queries), 1)} '
+    f'quer{"y" if max(len(queries), 1) == 1 else "ies"} &times; {runs} runs. '
+    f'This is a rough estimate of what the AI providers (OpenAI, Anthropic, Google) will charge to '
+    f'<strong>your own API keys</strong> for this run — the tool itself is free and never charges you anything.'
+    f'</div>',
+    unsafe_allow_html=True,
 )
 
 
