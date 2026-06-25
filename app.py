@@ -170,21 +170,21 @@ results = st.session_state.results
 if results:
     st.divider()
     st.header("Results")
-    for r in results:
+    for ri, r in enumerate(results):
         st.subheader(r["query"])
         tabs = st.tabs(["Brief", "Patterns", "Raw elicited", "Raw modeled"])
         with tabs[0]:
             if r["brief"]:
                 st.markdown(r["brief"])
                 st.download_button("Download brief (.md)", r["brief"],
-                                   file_name="brief.md", key=f"dlb_{r['query'][:20]}")
+                                   file_name="brief.md", key=f"dlb_{ri}")
             else:
                 st.caption("BRIEFS was skipped.")
         with tabs[1]:
             if r["patterns"]:
                 st.markdown(r["patterns"])
                 st.download_button("Download patterns (.md)", r["patterns"],
-                                   file_name="patterns.md", key=f"dlp_{r['query'][:20]}")
+                                   file_name="patterns.md", key=f"dlp_{ri}")
             else:
                 st.caption("PATTERNS was skipped.")
         elicited_caps = [c for c in r["captures"] if "engines" in c]
@@ -199,7 +199,7 @@ if results:
                                 st.markdown(f"*run {run['run']}:* " + "; ".join(run["queries"]))
                 st.download_button("Download raw elicited (.json)",
                                    json.dumps(elicited_caps, indent=2, ensure_ascii=False),
-                                   file_name="elicited.json", key=f"dle_{r['query'][:20]}")
+                                   file_name="elicited.json", key=f"dle_{ri}")
             else:
                 st.caption("No elicited fan-outs were run.")
         with tabs[3]:
@@ -213,6 +213,6 @@ if results:
                             st.markdown(f"*run {run['run']}:* " + "; ".join(subs))
                 st.download_button("Download raw modeled (.json)",
                                    json.dumps(modeled_caps, indent=2, ensure_ascii=False),
-                                   file_name="modeled.json", key=f"dlm_{r['query'][:20]}")
+                                   file_name="modeled.json", key=f"dlm_{ri}")
             else:
                 st.caption("No modeled fan-outs were run.")

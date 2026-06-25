@@ -46,8 +46,11 @@ Validation:
 
 - ✅ Core logic ported faithfully (offline parity + end-to-end smoke on real APIs).
 - ✅ Modeled + PATTERNS + BRIEFS pipeline runs on real keys.
-- ⚠️ The Streamlit UI has **not** been run live yet (streamlit isn't installed in the build env). It
-  py-compiles and the core calls are exercised, but a `streamlit run app.py` smoke is the next check.
+- ✅ The Streamlit app **boots clean** under Streamlit's headless `AppTest` (no exceptions; title +
+  all widgets — Run button, checkboxes, query area, key inputs — build). Fixed a real bug found in
+  review: results `download_button` keys now use the result index (were `query[:20]`, which would
+  collide and crash Streamlit on similar queries). A full interactive click-through (enter keys +
+  click Run + inspect output) is the remaining manual check.
 - ⚠️ The **elicited** path is ported and unit-consistent with the captured data, but a live elicited
   run (real engine web-search calls) hasn't been triggered from the app.
 
