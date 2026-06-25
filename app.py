@@ -6,6 +6,8 @@ persisted. See tool-build-plan.md for the build phases.
 """
 import json
 import re
+import threading
+import time
 
 import streamlit as st
 
@@ -112,7 +114,7 @@ if modeled_personas:
             if st.button("Remove this persona", key=f"prm{idx}"):
                 st.session_state.personas.pop(idx)
                 st.rerun()
-    if st.button("➕ Add another persona"):
+    if st.button("Add another persona", type="primary", icon=":material/add:"):
         st.session_state.personas.append({"name": "", "fields": {}})
         st.rerun()
 
@@ -156,6 +158,49 @@ def _validate() -> list[str]:
     return errs
 
 
+def _friendly(err) -> str:
+    """Turn an exception or error string into a short, user-facing reason."""
+    s = str(err).lower()
+    if any(k in s for k in ("401", "unauthorized", "invalid api key", "invalid_api_key", "api key not valid",
+                            "incorrect api key", "authentication", "permission denied")):
+        return "the API key looks invalid or unauthorized — check you pasted the right key in the right box"
+    if any(k in s for k in ("429", "quota", "rate limit", "rate_limit", "insufficient_quota",
+                            "insufficient credit", "billing", "out of credit")):
+        return "the account hit a rate limit or is out of credits/quota"
+    if "timeout" in s or "timed out" in s:
+        return "the request timed out — the provider may be slow; try fewer runs or engines"
+    if any(k in s for k in ("connection", "network", "503", "502", "service unavailable",
+                            "overloaded", "econnreset", "ssl")):
+        return "couldn't reach the provider (network/service issue) — try again in a moment"
+    return str(err)
+
+
+def _run_step(fn, prog, start, end):
+    """Run blocking fn() in a worker thread while creeping the progress bar from `start` toward `end`,
+    so the bar never stalls during a long call. Returns fn()'s result; re-raises any error it threw."""
+    holder = {}
+
+    def work():
+        try:
+            holder["result"] = fn()
+        except Exception as exc:  # noqa: BLE001 — surfaced on the main thread
+            holder["error"] = exc
+
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    pct = start
+    ceiling = max(start, end - 0.01)  # don't reach the segment end until the work actually finishes
+    while t.is_alive():
+        time.sleep(0.25)
+        pct = min(pct + (ceiling - pct) * 0.08 + 0.004, ceiling)  # ease toward ceiling, always inch forward
+        prog.progress(min(pct, 1.0))
+    t.join()
+    prog.progress(min(end, 1.0))
+    if "error" in holder:
+        raise holder["error"]
+    return holder.get("result")
+
+
 # -------------------------------------------------------------------- run ----
 if st.button("▶ Run", type="primary"):
     errs = _validate()
@@ -165,33 +210,84 @@ if st.button("▶ Run", type="primary"):
     else:
         results = []
         cache: dict = {}
+        n_pers_run = sum(1 for p in personas if assemble(p.get("fields", {})))
+        steps_per_q = ((1 if elicited_engines else 0) + (1 if modeled_base else 0) + n_pers_run
+                       + (1 if do_patterns else 0) + (1 if do_briefs else 0))
+        total = max(steps_per_q * len(queries), 1)
+        done = 0
         prog = st.progress(0.0)
-        with st.status("Running…", expanded=True) as status:
-            for qi, q in enumerate(queries):
+        with st.status("Running… this can take a while — keep this tab open.", expanded=True) as status:
+            for q in queries:
                 st.write(f"**{q}**")
                 caps = []
-                if elicited_engines:
-                    st.write(f"  · eliciting from {', '.join(elicited_engines)} ({runs} runs each)…")
-                    caps.append(elicit.elicit(q, elicited_engines, runs, keys))
-                if modeled_base:
-                    st.write("  · modeling (no persona)…")
-                    caps.append(model.model_one(q, None, model_engine, runs, keys[model_engine], None))
-                if modeled_personas:
-                    for idx, p in enumerate(personas):
-                        ptext = assemble(p.get("fields", {}))
-                        if not ptext:
-                            continue
-                        st.write(f"  · modeling persona '{p.get('name') or idx + 1}'…")
-                        caps.append(model.model_one(q, ptext, model_engine, runs,
-                                                    keys[model_engine], _slug(p.get("name", ""), idx)))
-                pat = patterns.patterns_md(q, caps, keys["gemini"], cache) if do_patterns else None
-                if do_patterns:
-                    st.write("  · PATTERNS done")
-                brf = brief.brief_md(q, caps, keys["gemini"], keys["openai"], cache) if do_briefs else None
-                if do_briefs:
-                    st.write("  · BRIEFS done")
-                results.append({"query": q, "captures": caps, "patterns": pat, "brief": brf})
-                prog.progress((qi + 1) / len(queries))
+                try:
+                    if elicited_engines:
+                        st.write(f"  · eliciting from {', '.join(elicited_engines)} — this is the slow part, "
+                                 f"give it a moment ({runs} runs each)…")
+                        ecap = _run_step(lambda: elicit.elicit(q, elicited_engines, runs, keys),
+                                         prog, done / total, (done + 1) / total)
+                        done += 1
+                        caps.append(ecap)
+                        for eng, rec in ecap["engines"].items():
+                            if not any("error" not in r for r in rec["runs"]):
+                                first = next((r["error"] for r in rec["runs"] if "error" in r), "")
+                                st.warning(f"⚠️ {ENGINE_DISPLAY.get(eng, eng)} elicitation failed — {_friendly(first)}")
+                    if modeled_base:
+                        st.write("  · modeling (no persona)…")
+                        mcap = _run_step(
+                            lambda: model.model_one(q, None, model_engine, runs, keys[model_engine], None),
+                            prog, done / total, (done + 1) / total)
+                        done += 1
+                        caps.append(mcap)
+                        if not any("error" not in r for r in mcap["result"]["runs"]):
+                            first = next((r["error"] for r in mcap["result"]["runs"] if "error" in r), "")
+                            st.warning(f"⚠️ Modeled (no persona) failed — {_friendly(first)}")
+                    if modeled_personas:
+                        for idx, p in enumerate(personas):
+                            ptext = assemble(p.get("fields", {}))
+                            if not ptext:
+                                continue
+                            nm = p.get("name") or idx + 1
+                            st.write(f"  · modeling persona '{nm}'…")
+                            label = _slug(p.get("name", ""), idx)
+                            pcap = _run_step(
+                                lambda ptext=ptext, label=label: model.model_one(
+                                    q, ptext, model_engine, runs, keys[model_engine], label),
+                                prog, done / total, (done + 1) / total)
+                            done += 1
+                            caps.append(pcap)
+                            if not any("error" not in r for r in pcap["result"]["runs"]):
+                                first = next((r["error"] for r in pcap["result"]["runs"] if "error" in r), "")
+                                st.warning(f"⚠️ Persona '{nm}' modeling failed — {_friendly(first)}")
+                    pat = brf = None
+                    has_data = any(
+                        ("engines" in c and any(r.get("queries") for rec in c["engines"].values()
+                                                for r in rec["runs"]))
+                        or ("result" in c and any(r.get("sub_queries") for r in c["result"]["runs"]))
+                        for c in caps)
+                    if (do_patterns or do_briefs) and not has_data:
+                        st.error(f"❌ No fan-outs were captured for “{q}” — every selected source failed "
+                                 f"(see the warnings above), so there's nothing to analyze. Check your keys/credits.")
+                    if has_data and do_patterns:
+                        try:
+                            pat = _run_step(lambda: patterns.patterns_md(q, caps, keys["gemini"], cache),
+                                            prog, done / total, (done + 1) / total)
+                            st.write("  · PATTERNS done")
+                        except Exception as exc:  # noqa: BLE001
+                            st.error(f"❌ PATTERNS failed for “{q}” — {_friendly(exc)}")
+                        done += 1
+                    if has_data and do_briefs:
+                        try:
+                            brf = _run_step(lambda: brief.brief_md(q, caps, keys["gemini"], keys["openai"], cache),
+                                            prog, done / total, (done + 1) / total)
+                            st.write("  · BRIEFS done")
+                        except Exception as exc:  # noqa: BLE001
+                            st.error(f"❌ BRIEFS failed for “{q}” — {_friendly(exc)}")
+                        done += 1
+                    results.append({"query": q, "captures": caps, "patterns": pat, "brief": brf})
+                except Exception as exc:  # noqa: BLE001 — backstop so one query can't kill the whole run
+                    st.error(f"❌ “{q}” failed — {_friendly(exc)}")
+            prog.progress(1.0)
             status.update(label="Done", state="complete")
         st.session_state.results = results
 

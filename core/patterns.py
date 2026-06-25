@@ -407,10 +407,10 @@ def report(qid, prompt, group, api_key, cache):
           f"{d['mean_srcclasses_per_cluster']} (higher = the embedding is mixing sources by intent)",
           "- pooled noise rate per source (high = that source's strings vanish when pooled):"]
     for s, v in sorted(d["pooled_noise"].items()):
-        L.append(f"    - {s}: {v}")
+        L.append(f"    - {s} — {v}")
     L.append("- per-source-class clustering (can a sparse source even cluster alone?):")
     for s, v in sorted(d["perclass"].items()):
-        L.append(f"    - {s}: {v['distinct']} distinct → {v['clusters']} clusters, {v['noise']} noise")
+        L.append(f"    - {s} — {v['distinct']} distinct → {v['clusters']} clusters, {v['noise']} noise")
     return "\n".join(L)
 
 
