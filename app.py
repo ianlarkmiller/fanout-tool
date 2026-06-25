@@ -28,12 +28,6 @@ def _slug(name: str, idx: int) -> str:
 
 # ---------------------------------------------------------------- sidebar ----
 with st.sidebar:
-    st.header("API keys")
-    st.caption("Used in memory for this run only — never logged or stored. Bring your own.")
-    openai_key = st.text_input("OpenAI API key", type="password")
-    gemini_key = st.text_input("Google Gemini API key", type="password")
-    anthropic_key = st.text_input("Anthropic API key (optional)", type="password")
-
     st.header("What to run")
     elicited_engines = st.multiselect(
         "Elicit live fan-outs from", ["openai", "gemini", "anthropic"], default=[],
@@ -53,6 +47,23 @@ with st.sidebar:
     ))
     do_patterns = not st.checkbox("Skip PATTERNS (free deterministic analysis)", value=False)
     do_briefs = not st.checkbox("Skip BRIEFS (the writer's brief)", value=False)
+
+    # Which keys are actually required given the current selections (drives the labels below).
+    _using_modeled = modeled_base or modeled_personas
+    need_openai = do_briefs or ("openai" in elicited_engines) or (_using_modeled and model_engine == "openai")
+    need_gemini = (do_patterns or do_briefs or ("gemini" in elicited_engines)
+                   or (_using_modeled and model_engine == "gemini"))
+    need_anthropic = ("anthropic" in elicited_engines) or (_using_modeled and model_engine == "anthropic")
+
+    st.header("API keys")
+    st.caption("Used in memory for this run only — never logged or stored. Bring your own.")
+
+    def _klabel(name: str, need: bool) -> str:
+        return f"{name} API key" + (" — required" if need else " — not needed for current selections")
+
+    openai_key = st.text_input(_klabel("OpenAI", need_openai), type="password")
+    gemini_key = st.text_input(_klabel("Google Gemini", need_gemini), type="password")
+    anthropic_key = st.text_input(_klabel("Anthropic", need_anthropic), type="password")
 
 keys = {"openai": openai_key, "gemini": gemini_key, "anthropic": anthropic_key}
 
@@ -98,9 +109,9 @@ est = cost.estimate(
     modeled_base=modeled_base, n_personas=n_personas, do_patterns=do_patterns, do_briefs=do_briefs,
 )
 st.info(
-    f"**Rough cost estimate:** ~${est['total']:.2f} "
-    f"(elicited ${est['elicited']:.2f} · modeled ${est['modeled']:.2f} · "
-    f"PATTERNS ${est['patterns']:.3f} · BRIEFS ${est['briefs']:.2f}) "
+    f"**Rough cost estimate:** ~\\${est['total']:.2f} "
+    f"(elicited \\${est['elicited']:.2f} · modeled \\${est['modeled']:.2f} · "
+    f"PATTERNS \\${est['patterns']:.3f} · BRIEFS \\${est['briefs']:.2f}) "
     f"for {max(len(queries),1)} quer{'y' if len(queries)==1 else 'ies'} × {runs} runs. "
     f"You pay your own providers; this estimate uses measured per-run averages."
 )
