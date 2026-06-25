@@ -240,8 +240,7 @@ if st.button("▶ Run", type="primary"):
                 caps = []
                 try:
                     if elicited_engines:
-                        st.write(f"  · eliciting from {', '.join(elicited_engines)} — this is the slow part, "
-                                 f"give it a moment ({runs} runs each)…")
+                        st.write(f"  · eliciting from {', '.join(elicited_engines)} ({runs} runs each)…")
                         ecap = _run_step(lambda: elicit.elicit(q, elicited_engines, runs, keys),
                                          prog, done / total, (done + 1) / total)
                         done += 1
