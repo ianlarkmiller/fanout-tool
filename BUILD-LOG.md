@@ -53,19 +53,24 @@ Validation:
   arbitrary queries through the actual UI code. Also fixed a real bug found in review: results
   `download_button` keys now use the result index (were `query[:20]`, which would collide and crash
   Streamlit on similar queries).
-- ⚠️ The **elicited** path is ported and offline-consistent with the captured data, but a *live*
-  elicited run (real engine web-search calls) hasn't been triggered from the app yet — only the
-  modeled path has been exercised live.
+- ✅ The **elicited** path is now validated live too: via AppTest, a Gemini elicited run on a fresh
+  query ("best budget mechanical keyboard") captured 7 real web-search sub-queries and rendered
+  pooled PATTERNS + BRIEFS with no exceptions. All three paths — modeled, elicited, pooled
+  analysis/brief — are exercised on real APIs.
 
-## Next
+## Status: DEPLOYED (2026-06-25)
 
-1. Browser eyeball: `pip install -r requirements.txt` → `streamlit run app.py`; check layout, tabs,
-   and the download buttons render as expected.
-2. Trigger one live **elicited** run from the app (select an engine + its key) to exercise that path.
+Live (public) at **https://fanout-tool.streamlit.app** — Streamlit Community Cloud, deploying from the
+now-public repo on `main`. The repo was flipped public to deploy (it holds only code/docs/config —
+no secrets; BYO-keys).
+
+Remaining:
+1. Ian's real-browser click-through on the hosted app with his own keys.
+2. Optional cosmetic polish from the spec review: surface the run-count recommendation inline (it's
+   currently a hover tooltip); rename the "Patterns" output tab → "Analysis" to match the spec wording;
+   note the engine picker is a multiselect, not a single dropdown.
 3. Error-handling polish (invalid keys, API failures, quota) surfaced in the UI.
-4. **Deploy** to Streamlit Community Cloud or Hugging Face Spaces (free) — needs Ian's account to
-   connect the GitHub repo (OAuth), so this step waits on him.
-5. Then drop the live link into the article where the tool is teased.
+4. Drop the live link into the article where the tool is teased.
 
 ## Run locally
 
