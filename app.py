@@ -16,6 +16,10 @@ from core.persona_fields import PERSONA_FIELDS, assemble
 
 st.set_page_config(page_title="Query fan-out tool", layout="wide", initial_sidebar_state="expanded")
 
+# Hide Streamlit's per-widget "Press Enter to submit form" hint — our forms commit on the buttons,
+# so the hint is misleading (and it's the very behavior the form design removes).
+st.markdown('<style>[data-testid="InputInstructions"]{display:none;}</style>', unsafe_allow_html=True)
+
 # ---- session state ----
 st.session_state.setdefault("results", None)
 # Persist the last-submitted query in the URL so it survives a mobile tab reload (no extra deps).
