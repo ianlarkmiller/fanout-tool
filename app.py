@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 
 import streamlit as st
 
-from core import brief, cost, elicit, model, patterns
+from core import brief, cost, elicit, keycheck, model, patterns
 from core.persona_fields import PERSONA_FIELDS, assemble
 
 st.set_page_config(page_title="Query fan-out tool", layout="wide", initial_sidebar_state="expanded")
@@ -32,7 +32,11 @@ def _slug(name: str, idx: int) -> str:
 ENGINE_DISPLAY = {"openai": "OpenAI", "gemini": "Gemini", "anthropic": "Anthropic"}
 model_engine = "gemini"  # modeling is fixed to the validated model (the prompt was tuned on Flash)
 
-# ----------------------------------------- sidebar: run options (stay live) ----
+def _klabel(name: str, need: bool) -> str:
+    return f"{name} API key" + (" — required" if need else " — not needed for current selections")
+
+
+# ----------------------------------------- sidebar: run options + API keys ----
 with st.sidebar:
     st.header("Run options")
     elicited_engines = st.multiselect(
@@ -54,16 +58,38 @@ with st.sidebar:
     do_patterns = not st.checkbox("Skip PATTERNS (free deterministic analysis)", value=False)
     do_briefs = not st.checkbox("Skip BRIEFS (the writer's brief)", value=False)
 
-modeled_personas = n_personas_ui > 0
-_using_modeled = modeled_base or modeled_personas
-need_openai = do_briefs or ("openai" in elicited_engines) or (_using_modeled and model_engine == "openai")
-need_gemini = (do_patterns or do_briefs or ("gemini" in elicited_engines)
-               or (_using_modeled and model_engine == "gemini"))
-need_anthropic = ("anthropic" in elicited_engines) or (_using_modeled and model_engine == "anthropic")
+    modeled_personas = n_personas_ui > 0
+    _using_modeled = modeled_base or modeled_personas
+    need_openai = do_briefs or ("openai" in elicited_engines) or (_using_modeled and model_engine == "openai")
+    need_gemini = (do_patterns or do_briefs or ("gemini" in elicited_engines)
+                   or (_using_modeled and model_engine == "gemini"))
+    need_anthropic = ("anthropic" in elicited_engines) or (_using_modeled and model_engine == "anthropic")
 
-
-def _klabel(name: str, need: bool) -> str:
-    return f"{name} API key" + (" — required" if need else " — not needed for current selections")
+    st.header("API keys")
+    st.caption("Used in memory for this run only — never logged or stored.")
+    with st.form("keys_form"):
+        st.text_input(_klabel("OpenAI", need_openai), type="password", key="openai_key")
+        st.text_input(_klabel("Google Gemini", need_gemini), type="password", key="gemini_key")
+        st.text_input(_klabel("Anthropic", need_anthropic), type="password", key="anthropic_key")
+        _saved = st.form_submit_button("Save & check keys")
+    _raw_keys = {p: st.session_state.get(f"{p}_key", "") for p in ("openai", "gemini", "anthropic")}
+    keys = {p: v.strip() for p, v in _raw_keys.items()}
+    if _saved:
+        with st.spinner("Checking keys…"):
+            st.session_state["key_status"] = keycheck.check_keys(_raw_keys)
+    _kstatus = st.session_state.get("key_status", {})
+    for _p in ("openai", "gemini", "anthropic"):
+        if not _raw_keys[_p]:
+            continue
+        _ok, _msg = _kstatus.get(_p, (None, ""))
+        if _ok is True:
+            st.caption(f"✓ {ENGINE_DISPLAY[_p]} key valid" + (f" — {_msg}" if _msg else ""))
+        elif _ok is False:
+            st.caption(f"✗ {ENGINE_DISPLAY[_p]} key — {_msg}")
+        else:
+            st.caption(f"… {ENGINE_DISPLAY[_p]} key entered — tap **Save & check keys**")
+    if not any(_raw_keys.values()):
+        st.caption("⚠ Enter your keys above, then tap **Save & check keys**.")
 
 
 # ----------------------------------------------------------------- header ----
@@ -84,7 +110,7 @@ st.caption(
     "pool repeated runs, and get a deterministic entity analysis + a writer's brief — every angle and "
     "source tagged by where it came from."
 )
-st.caption("⚙️ Engine & run options are in the sidebar — on mobile, tap the ›› at the top-left to open it.")
+st.caption("⚙️ Your API keys and run options are in the sidebar — on mobile, tap the ›› at the top-left to open it.")
 
 # ----------------------------------------------------------- cost estimate ----
 est = cost.estimate(
@@ -102,14 +128,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --------------------------------------------- inputs (one form → one Run tap) ----
+# --------------------------------------------- query + personas (one form) ----
 # Text fields live in a form so a single Run tap commits them all at once — no per-field Enter
-# (which is unintuitive/unreliable on mobile). Options + cost + key labels stay outside, so they're live.
+# (which is unintuitive/unreliable on mobile). API keys live in their own sidebar form.
 with st.form("inputs"):
-    st.markdown("**API keys** — used in memory for this run only; never logged or stored.")
-    openai_key = st.text_input(_klabel("OpenAI", need_openai), type="password")
-    gemini_key = st.text_input(_klabel("Google Gemini", need_gemini), type="password")
-    anthropic_key = st.text_input(_klabel("Anthropic", need_anthropic), type="password")
     queries_text = st.text_area("Queries (one per line)", value=_restored_q, key="query_box", height=110,
                                 placeholder="what's the best way to get out of credit card debt?")
     persona_inputs = []
@@ -123,7 +145,6 @@ with st.form("inputs"):
             persona_inputs.append({"name": pname, "fields": pf})
     submitted = st.form_submit_button("▶ Run", type="primary")
 
-keys = {"openai": openai_key, "gemini": gemini_key, "anthropic": anthropic_key}
 queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
 personas = persona_inputs
 
@@ -145,6 +166,11 @@ def _validate() -> list[str]:
         errs.append("PATTERNS/BRIEFS need the Gemini key (for embeddings). Add it or skip both.")
     if do_briefs and not keys.get("openai"):
         errs.append("BRIEFS needs the OpenAI key (for the writer's brief). Add it or skip BRIEFS.")
+    _ks = st.session_state.get("key_status", {})
+    for _p in ("openai", "gemini", "anthropic"):
+        if keys.get(_p) and _ks.get(_p, (None, ""))[0] is False:
+            errs.append(f"{ENGINE_DISPLAY[_p]} key failed the check ({_ks[_p][1]}) — fix it in the sidebar "
+                        f"and tap “Save & check keys”.")
     return errs
 
 
