@@ -110,7 +110,7 @@ st.caption(
     "pool repeated runs, and get a deterministic entity analysis + a writer's brief — every angle and "
     "source tagged by where it came from."
 )
-st.caption("⚙️ Your API keys and run options are in the sidebar — on mobile, tap the ›› at the top-left to open it.")
+st.caption("⚙️ Your API keys and run options are in the sidebar — if it isn't visible, tap the ›› at the top-left to open it.")
 
 # ----------------------------------------------------------- cost estimate ----
 n_personas = len(st.session_state.personas) if modeled_personas else 0
