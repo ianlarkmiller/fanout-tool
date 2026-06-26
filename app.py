@@ -18,6 +18,8 @@ st.set_page_config(page_title="Query fan-out tool", layout="wide", initial_sideb
 
 # ---- session state ----
 st.session_state.setdefault("results", None)
+# Persist the last-submitted query in the URL so it survives a mobile tab reload (no extra deps).
+_restored_q = st.query_params.get("q", "")
 
 
 def _slug(name: str, idx: int) -> str:
@@ -108,7 +110,7 @@ with st.form("inputs"):
     openai_key = st.text_input(_klabel("OpenAI", need_openai), type="password")
     gemini_key = st.text_input(_klabel("Google Gemini", need_gemini), type="password")
     anthropic_key = st.text_input(_klabel("Anthropic", need_anthropic), type="password")
-    queries_text = st.text_area("Queries (one per line)", height=110,
+    queries_text = st.text_area("Queries (one per line)", value=_restored_q, key="query_box", height=110,
                                 placeholder="what's the best way to get out of credit card debt?")
     persona_inputs = []
     if n_personas_ui > 0:
@@ -211,6 +213,10 @@ def _parallel(tasks, prog, start, end, expected_s):
 
 # -------------------------------------------------------------------- run ----
 if submitted:
+    # remember the submitted query in the URL (survives a reload); skip if too long for a URL
+    _qjoined = "\n".join(queries)
+    if queries and len(_qjoined) <= 1500:
+        st.query_params["q"] = _qjoined
     errs = _validate()
     if errs:
         for e in errs:
