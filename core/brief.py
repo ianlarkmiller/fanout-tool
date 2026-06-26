@@ -148,11 +148,8 @@ def brief(qid, prompt, group, gemini_api_key, openai_api_key, cache):
     inp += ["", "CLUSTERS (id: representative search | samples):"]
     for i, c in enumerate(clusters):
         inp.append(f"{i}: {c['medoid']} | " + " / ".join(c["samples"][1:4]))
-    try:
-        out = llm_json("\n".join(inp), openai_api_key)
-    except Exception as exc:  # degrade rather than fail
-        return (f"## Brief — \"{prompt}\" ({qid})\n\n*LLM polish failed ({type(exc).__name__}: {exc}); "
-                f"use the raw analysis from PATTERNS.*\n")
+    # Let LLM/parse errors propagate — the app surfaces a clean message and still shows PATTERNS.
+    out = llm_json("\n".join(inp), openai_api_key)
 
     cl = {int(k): v for k, v in out.get("cluster_labels", {}).items()}
     commercial = out.get("page_type") == "commercial"

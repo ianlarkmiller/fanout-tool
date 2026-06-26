@@ -6,9 +6,8 @@ persisted. See tool-build-plan.md for the build phases.
 """
 import json
 import re
-import threading
 import time
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import streamlit as st
 
@@ -190,30 +189,36 @@ def _run_warnings(label: str, runs_list: list) -> None:
                    f"(kept the {ok} that worked)")
 
 
-def _run_step(fn, prog, start, end, expected_s) -> Any:
-    """Run blocking fn() in a worker thread, advancing the bar from `start` to `end` LINEARLY over
-    ~expected_s (paced to the real work), then snap to `end` when it finishes. Re-raises fn()'s error."""
-    holder = {}
-
-    def work():
-        try:
-            holder["result"] = fn()
-        except Exception as exc:  # noqa: BLE001 — surfaced on the main thread
-            holder["error"] = exc
-
-    t = threading.Thread(target=work, daemon=True)
-    t.start()
+def _parallel(tasks, prog, start, end, expected_s):
+    """Run tasks (list of (key, callable)) ALL concurrently while advancing the bar from `start` to
+    `end` over ~expected_s; snap to `end` when all finish. Returns (results{key:val}, errors{key:exc})."""
+    results, errors = {}, {}
+    if not tasks:
+        prog.progress(min(end, 1.0))
+        return results, errors
+    ex = ThreadPoolExecutor(max_workers=len(tasks))
+    futs = {ex.submit(fn): key for key, fn in tasks}
     t0 = time.time()
-    ceiling = max(start, end - 0.005)  # don't quite reach the segment end until the work finishes
-    while t.is_alive():
-        time.sleep(0.3)
-        frac = min((time.time() - t0) / max(expected_s, 1.0), 1.0)
-        prog.progress(min(start + (ceiling - start) * frac, ceiling))
-    t.join()
+    ceiling = max(start, end - 0.005)
+    pending = set(futs)
+    pct = start
+    while pending:
+        done_now, pending = wait(pending, timeout=0.3)
+        for f in done_now:
+            key = futs[f]
+            try:
+                results[key] = f.result()
+            except Exception as exc:  # noqa: BLE001
+                errors[key] = exc
+        el = time.time() - t0
+        if el <= expected_s:
+            pct = max(pct, start + (ceiling - start) * (el / expected_s))
+        else:  # past the estimate — keep inching toward the ceiling so it never looks frozen
+            pct = min(pct + (ceiling - pct) * 0.05 + 0.0015, ceiling)
+        prog.progress(min(pct, ceiling))
+    ex.shutdown(wait=True)
     prog.progress(min(end, 1.0))
-    if "error" in holder:
-        raise holder["error"]
-    return holder["result"]
+    return results, errors
 
 
 # -------------------------------------------------------------------- run ----
@@ -224,60 +229,61 @@ if st.button("▶ Run", type="primary"):
             st.error(e)
     else:
         results = []
-        cache: dict = {}
         n_pers_run = sum(1 for p in personas if assemble(p.get("fields", {})))
         S = cost.STEP_SECONDS
-        per_q_s = ((len(elicited_engines) * runs * S["elicit_run"])
-                   + (runs * S["model_run"] if modeled_base else 0.0)
-                   + (n_pers_run * runs * S["model_run"])
-                   + (S["patterns"] if do_patterns else 0.0)
-                   + (S["brief"] if do_briefs else 0.0))
-        total_s = max(per_q_s * len(queries), 1.0)
-        elapsed = 0.0  # planned seconds consumed so far — drives the bar position
+        # Wall-clock per query with everything parallel: capture (elicited + modeled, all at once) =
+        # the slowest of the two; analysis (PATTERNS + BRIEFS at once) = the slower of the two.
+        capture_wall = max(S["elicit_run"] if elicited_engines else 0.0,
+                           S["model_run"] if (modeled_base or n_pers_run) else 0.0)
+        analysis_wall = max(S["patterns"] if do_patterns else 0.0, S["brief"] if do_briefs else 0.0)
+        per_q_wall = max(capture_wall + analysis_wall, 1.0)
+        cap_frac = capture_wall / per_q_wall   # share of a query's bar span used by the capture phase
+        nq = len(queries)
         prog = st.progress(0.0)
         with st.status("Running… this can take a while — keep this tab open.", expanded=True) as status:
-            for q in queries:
+            for qi, q in enumerate(queries):
+                base = qi / nq
+                cap_end = base + cap_frac / nq
+                q_end = (qi + 1) / nq
                 st.write(f"**{q}**")
-                caps = []
                 try:
+                    # ---- capture phase: elicited + all modeled runs, ALL concurrent ----
+                    ctasks = []
                     if elicited_engines:
-                        st.write(f"  · eliciting from {', '.join(elicited_engines)} ({runs} runs each)…")
-                        seg = len(elicited_engines) * runs * S["elicit_run"]
-                        ecap = _run_step(lambda: elicit.elicit(q, elicited_engines, runs, keys),
-                                         prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
-                        elapsed += seg
-                        caps.append(ecap)
-                        for eng, rec in ecap["engines"].items():
-                            _run_warnings(f"{ENGINE_DISPLAY.get(eng, eng)} elicitation", rec["runs"])
-                            if any(r.get("truncated") for r in rec["runs"]):
-                                st.warning(f"⚠️ {ENGINE_DISPLAY.get(eng, eng)} hit its search cap on some runs — "
-                                           f"that fan-out may be truncated.")
+                        ctasks.append(("elicited", lambda q=q: elicit.elicit(q, elicited_engines, runs, keys)))
                     if modeled_base:
-                        st.write("  · modeling (no persona)…")
-                        seg = runs * S["model_run"]
-                        mcap = _run_step(
-                            lambda: model.model_one(q, None, model_engine, runs, keys[model_engine], None),
-                            prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
-                        elapsed += seg
-                        caps.append(mcap)
-                        _run_warnings("Modeled (no persona)", mcap["result"]["runs"])
+                        ctasks.append(("modeled (no persona)",
+                                       lambda q=q: model.model_one(q, None, model_engine, runs,
+                                                                   keys[model_engine], None)))
                     if modeled_personas:
                         for idx, p in enumerate(personas):
                             ptext = assemble(p.get("fields", {}))
                             if not ptext:
                                 continue
                             nm = p.get("name") or idx + 1
-                            st.write(f"  · modeling persona '{nm}'…")
                             label = _slug(p.get("name", ""), idx)
-                            seg = runs * S["model_run"]
-                            pcap = _run_step(
-                                lambda ptext=ptext, label=label: model.model_one(
-                                    q, ptext, model_engine, runs, keys[model_engine], label),
-                                prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
-                            elapsed += seg
-                            caps.append(pcap)
-                            _run_warnings(f"Persona '{nm}' modeling", pcap["result"]["runs"])
-                    pat = brf = None
+                            ctasks.append((f"persona '{nm}'",
+                                           lambda q=q, ptext=ptext, label=label: model.model_one(
+                                               q, ptext, model_engine, runs, keys[model_engine], label)))
+                    if ctasks:
+                        st.write(f"  · running {len(ctasks)} source(s) × {runs} runs in parallel…")
+                    cres, cerr = _parallel(ctasks, prog, base, cap_end, capture_wall)
+                    caps = []
+                    for key, _fn in ctasks:
+                        if key in cerr:
+                            st.warning(f"⚠️ {key} failed — {_friendly(cerr[key])}")
+                            continue
+                        cap = cres[key]
+                        caps.append(cap)
+                        if key == "elicited":
+                            for eng, rec in cap["engines"].items():
+                                _run_warnings(f"{ENGINE_DISPLAY.get(eng, eng)} elicitation", rec["runs"])
+                                if any(r.get("truncated") for r in rec["runs"]):
+                                    st.warning(f"⚠️ {ENGINE_DISPLAY.get(eng, eng)} hit its search cap on some "
+                                               f"runs — fan-out may be truncated.")
+                        else:
+                            _run_warnings(key, cap["result"]["runs"])
+                    # ---- analysis phase: PATTERNS + BRIEFS concurrent (each its own embed cache) ----
                     has_data = any(
                         ("engines" in c and any(r.get("queries") for rec in c["engines"].values()
                                                 for r in rec["runs"]))
@@ -286,28 +292,26 @@ if st.button("▶ Run", type="primary"):
                     if (do_patterns or do_briefs) and not has_data:
                         st.error(f"❌ No fan-outs were captured for “{q}” — every selected source failed "
                                  f"(see the warnings above), so there's nothing to analyze. Check your keys/credits.")
+                    atasks = []
                     if has_data and do_patterns:
-                        seg = S["patterns"]
-                        try:
-                            pat = _run_step(lambda: patterns.patterns_md(q, caps, keys["gemini"], cache),
-                                            prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
-                            st.write("  · PATTERNS done")
-                        except Exception as exc:  # noqa: BLE001
-                            st.error(f"❌ PATTERNS failed for “{q}” — {_friendly(exc)}")
-                        elapsed += seg
+                        atasks.append(("patterns",
+                                       lambda q=q, caps=caps: patterns.patterns_md(q, caps, keys["gemini"], {})))
                     if has_data and do_briefs:
-                        seg = S["brief"]
-                        try:
-                            brf = _run_step(lambda: brief.brief_md(q, caps, keys["gemini"], keys["openai"], cache),
-                                            prog, elapsed / total_s, (elapsed + seg) / total_s, seg)
-                            st.write("  · BRIEFS done")
-                        except Exception as exc:  # noqa: BLE001
-                            st.error(f"❌ BRIEFS failed for “{q}” — {_friendly(exc)}")
-                        elapsed += seg
-                    results.append({"query": q, "captures": caps, "patterns": pat, "brief": brf})
+                        atasks.append(("brief",
+                                       lambda q=q, caps=caps: brief.brief_md(q, caps, keys["gemini"],
+                                                                             keys["openai"], {})))
+                    if atasks:
+                        st.write("  · generating PATTERNS + BRIEFS in parallel…")
+                    ares, aerr = _parallel(atasks, prog, cap_end, q_end, analysis_wall)
+                    if "patterns" in aerr:
+                        st.error(f"❌ PATTERNS failed for “{q}” — {_friendly(aerr['patterns'])}")
+                    if "brief" in aerr:
+                        st.error(f"❌ BRIEFS failed for “{q}” — {_friendly(aerr['brief'])}")
+                    results.append({"query": q, "captures": caps,
+                                    "patterns": ares.get("patterns"), "brief": ares.get("brief")})
                 except Exception as exc:  # noqa: BLE001 — backstop so one query can't kill the whole run
                     st.error(f"❌ “{q}” failed — {_friendly(exc)}")
-            prog.progress(1.0)
+                prog.progress(q_end)  # always sync the bar to the query boundary, whatever happened
             status.update(label="Done", state="complete")
         st.session_state.results = results
 

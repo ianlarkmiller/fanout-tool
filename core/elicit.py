@@ -7,6 +7,8 @@ no stdout, no file writes. `elicit()` returns the capture dict shape the analyze
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 OPENAI_MODEL = "gpt-5.5"
 ANTHROPIC_MODEL = "claude-sonnet-4-6"
 ANTHROPIC_WEB_SEARCH_TOOL = "web_search_20250305"
@@ -122,28 +124,33 @@ ENGINES = {
 }
 
 
-def run_engine(key: str, prompt: str, runs: int, api_key: str) -> dict:
-    """Run one engine N times. Returns a structured record (no printing)."""
-    label, fn = ENGINES[key]
-    record = {"label": label, "model": MODELS[key], "runs": [], "total_cost_usd": 0.0}
-    for i in range(1, runs + 1):
-        try:
-            qs, usage = fn(prompt, api_key)
-        except Exception as exc:  # noqa: BLE001 — record and continue
-            record["runs"].append({"run": i, "error": f"{type(exc).__name__}: {exc}"})
-            continue
-        c = call_cost(key, usage)
-        record["total_cost_usd"] += c
-        record["runs"].append({"run": i, "queries": qs, **usage, "cost_usd": round(c, 6)})
-    return record
+def _one_run(key: str, prompt: str, api_key: str, i: int) -> dict:
+    """One engine, one run. Returns a per-run record (errors recorded, never raised)."""
+    fn = ENGINES[key][1]
+    try:
+        qs, usage = fn(prompt, api_key)
+    except Exception as exc:  # noqa: BLE001 — record and continue
+        return {"run": i, "error": f"{type(exc).__name__}: {exc}"}
+    c = call_cost(key, usage)
+    return {"run": i, "queries": qs, **usage, "cost_usd": round(c, 6)}
 
 
 def elicit(prompt: str, engines: list[str], runs: int, keys: dict[str, str]) -> dict:
-    """Elicit live fan-outs from each requested engine that has a key. `keys`: {engine: api_key}.
-    Returns a capture dict: {prompt, engines: {engine: record}}."""
+    """Elicit live fan-outs from each requested engine that has a key. ALL (engine × run) calls run
+    concurrently. `keys`: {engine: api_key}. Returns {prompt, engines: {engine: record}}."""
+    jobs = [(e, i) for e in engines if keys.get(e) for i in range(1, runs + 1)]
     out: dict = {"prompt": prompt, "engines": {}}
+    if not jobs:
+        return out
+    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        recs = list(ex.map(lambda ei: (ei[0], _one_run(ei[0], prompt, keys[ei[0]], ei[1])), jobs))
+    by_engine: dict[str, list] = {}
+    for e, rec in recs:
+        by_engine.setdefault(e, []).append(rec)
     for e in engines:
         if not keys.get(e):
             continue
-        out["engines"][e] = run_engine(e, prompt, runs, keys[e])
+        runs_list = sorted(by_engine.get(e, []), key=lambda r: r["run"])
+        out["engines"][e] = {"label": ENGINES[e][0], "model": MODELS[e], "runs": runs_list,
+                             "total_cost_usd": round(sum(r.get("cost_usd", 0.0) for r in runs_list), 6)}
     return out

@@ -11,6 +11,7 @@ import datetime as _dt
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 MODELS = {
     "gemini": "gemini-3.5-flash",
@@ -125,17 +126,20 @@ def model_one(query: str, persona: str | None, engine: str, runs: int, api_key: 
     (None -> "base"). Returns a capture dict: {query, persona_file, engine, model, result:{runs:[...]}}."""
     fn = ENGINES[engine][1]
     prompt = build_prompt(query, persona)
-    rec = {"engine": engine, "model": MODELS[engine], "query": query, "runs": [], "total_cost_usd": 0.0}
-    for i in range(1, runs + 1):
+
+    def _one(i: int) -> dict:
         try:
             data, usage = fn(prompt, api_key)
         except Exception as exc:  # noqa: BLE001 — record and continue
-            rec["runs"].append({"run": i, "error": f"{type(exc).__name__}: {exc}"})
-            continue
+            return {"run": i, "error": f"{type(exc).__name__}: {exc}"}
         c = cost(engine, usage)
-        rec["total_cost_usd"] += c
         subs = data.get("sub_queries", []) if isinstance(data, dict) else []
-        rec["runs"].append({"run": i, "persona_reading": data.get("persona_reading", ""),
-                            "sub_queries": subs, **usage, "cost_usd": round(c, 6)})
+        return {"run": i, "persona_reading": data.get("persona_reading", ""),
+                "sub_queries": subs, **usage, "cost_usd": round(c, 6)}
+
+    with ThreadPoolExecutor(max_workers=max(runs, 1)) as ex:
+        runs_list = list(ex.map(_one, range(1, runs + 1)))  # ex.map preserves run order
+    rec = {"engine": engine, "model": MODELS[engine], "query": query, "runs": runs_list,
+           "total_cost_usd": round(sum(r.get("cost_usd", 0.0) for r in runs_list), 6)}
     return {"query": query, "persona_file": persona_label, "engine": engine,
             "model": MODELS[engine], "result": rec}
