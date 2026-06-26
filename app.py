@@ -22,6 +22,7 @@ st.markdown('<style>[data-testid="InputInstructions"]{display:none;}</style>', u
 
 # ---- session state ----
 st.session_state.setdefault("results", None)
+st.session_state.setdefault("n_personas", 0)  # how many persona field-groups the form renders
 # Persist the last-submitted query in the URL so it survives a mobile tab reload (no extra deps).
 _restored_q = st.query_params.get("q", "")
 
@@ -50,10 +51,23 @@ with st.sidebar:
     )
     modeled_base = st.checkbox("Modeled fan-out (no persona)", value=True,
                                help="An LLM's prediction of the fan-out for an anonymous searcher.")
-    n_personas_ui = int(st.number_input(
-        "Modeled buyer personas", min_value=0, max_value=10, value=0,
-        help="How many buyer personas to model. Set above 0 to reveal persona fields in the form.",
-    ))
+    # Add/remove buttons live OUTSIDE the form (forms can't hold non-submit buttons) and drive a count;
+    # the persona fields themselves render inside the main form, so they still commit on one Run tap.
+    st.markdown("**Modeled buyer personas**")
+    _pc1, _pc2 = st.columns(2)
+    if _pc1.button("➕ Add", type="primary", use_container_width=True,
+                   help="Add a buyer persona to model — its fields appear in the form."):
+        st.session_state.n_personas = min(10, st.session_state.n_personas + 1)
+    if _pc2.button("➖ Remove", use_container_width=True, disabled=st.session_state.n_personas == 0,
+                   help="Remove the last persona (clears its fields)."):
+        _last = st.session_state.n_personas - 1
+        st.session_state.pop(f"pname{_last}", None)
+        for _f in PERSONA_FIELDS:
+            st.session_state.pop(f"pf{_last}_{_f['key']}", None)
+        st.session_state.n_personas = max(0, _last)
+    n_personas_ui = st.session_state.n_personas
+    if n_personas_ui:
+        st.caption(f"{n_personas_ui} persona{'s' if n_personas_ui != 1 else ''} — fill the fields in the form below.")
     st.caption(f"Modeled fan-outs use {model.MODELS['gemini']}.")
     runs = int(st.number_input(
         "Runs per query", min_value=1, max_value=20, value=5,
