@@ -293,7 +293,10 @@ if st.button("▶ Run", type="primary"):
                                            lambda q=q, ptext=ptext, label=label: model.model_one(
                                                q, ptext, model_engine, runs, keys[model_engine], label)))
                     if ctasks:
-                        st.write(f"  · running {len(ctasks)} source(s) × {runs} runs in parallel…")
+                        # count actual sources: each elicited engine (the "elicited" task bundles them all),
+                        # plus modeled-no-persona, plus each persona — not the number of task-groups.
+                        n_sources = len(elicited_engines) + (1 if modeled_base else 0) + n_pers_run
+                        st.write(f"  · running {n_sources} source(s) × {runs} runs in parallel…")
                     cres, cerr = _parallel(ctasks, prog, base, cap_end, capture_wall)
                     caps = []
                     for key, _fn in ctasks:
