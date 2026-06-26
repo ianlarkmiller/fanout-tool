@@ -121,8 +121,8 @@ est = cost.estimate(
 st.markdown(
     f'<div style="background:#f7f7f4; border-left:3px solid #557c63; padding:0.7rem 1rem; '
     f'border-radius:4px; margin:0.5rem 0; font-size:0.92rem;">'
-    f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f} per query</strong> (× however many queries '
-    f'you enter), at {runs} runs each. This is a rough estimate of what the AI providers (OpenAI, '
+    f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f} per query</strong>, at {runs} runs each '
+    f'(~&#36;{est["total"] / runs:.2f} per run). This is a rough estimate of what the AI providers (OpenAI, '
     f'Anthropic, Google) will charge to <strong>your own API keys</strong> — the tool itself is free '
     f'and never charges you anything.'
     f'</div>',
