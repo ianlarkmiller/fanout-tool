@@ -88,8 +88,6 @@ with st.sidebar:
             st.caption(f"✗ {ENGINE_DISPLAY[_p]} key — {_msg}")
         else:
             st.caption(f"… {ENGINE_DISPLAY[_p]} key entered — tap **Save & check keys**")
-    if not any(_raw_keys.values()):
-        st.caption("⚠ Enter your keys above, then tap **Save & check keys**.")
 
 
 # ----------------------------------------------------------------- header ----

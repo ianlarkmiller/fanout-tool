@@ -53,28 +53,35 @@ def _heartbeat(provider: str, key: str) -> None:
 
 
 def check_key(provider: str, raw_key: str) -> tuple[bool | None, str]:
-    """(True, note) valid / (False, reason) bad / (None, "") no key. Takes the RAW (untrimmed) value."""
+    """(True, note) valid / (False, reason) bad / (None, "") no key. Takes the RAW (untrimmed) value.
+
+    The heartbeat is authoritative: a key the provider accepts ALWAYS passes, even if its prefix is new or
+    unrecognized — so a provider changing its key format can never reject a valid key. Format/whitespace are
+    only hints that enrich a FAILURE message (e.g. "wrong box?"); they never block a key that actually works.
+    """
     if not raw_key:
         return (None, "")
     key = raw_key.strip()
     if not key:
         return (False, "is only whitespace")
-    # Wrong box: the key clearly matches a different provider's format.
-    looks = _looks_like(key)
-    if looks and looks != provider:
-        return (False, f"looks like {_DISPLAY[looks]}'s key format — paste it in the {_DISPLAY[looks]} box instead")
     notes = []
     if key != raw_key:
         notes.append("had extra spaces (trimmed)")
-    if not key.startswith(_PREFIXES[provider]):
-        notes.append("unexpected format (usually starts with "
-                     + " or ".join(f"'{p}'" for p in _PREFIXES[provider]) + ")")
+    # A non-blocking format hint, only used to explain a heartbeat failure (never to reject on its own).
+    looks = _looks_like(key)
+    if looks and looks != provider:
+        fmt_hint = f"this looks like {_DISPLAY[looks]}'s key format — wrong box?"
+    elif not key.startswith(_PREFIXES[provider]):
+        fmt_hint = ("unexpected format (usually starts with "
+                    + " or ".join(f"'{p}'" for p in _PREFIXES[provider]) + ")")
+    else:
+        fmt_hint = ""
     try:
         _heartbeat(provider, key)
     except Exception as exc:  # noqa: BLE001
-        reason = _friendly(exc)
-        return (False, f"{reason} ({'; '.join(notes)})" if notes else reason)
-    return (True, "; ".join(notes))
+        bits = [b for b in (_friendly(exc), fmt_hint, *notes) if b]
+        return (False, bits[0] + (f" ({'; '.join(bits[1:])})" if len(bits) > 1 else ""))
+    return (True, "; ".join(notes))  # valid → format hint suppressed (the heartbeat overrode our guess)
 
 
 def check_keys(keys: dict[str, str]) -> dict[str, tuple[bool | None, str]]:
