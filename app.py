@@ -22,7 +22,7 @@ st.markdown('<style>[data-testid="InputInstructions"]{display:none;}</style>', u
 
 # ---- session state ----
 st.session_state.setdefault("results", None)
-st.session_state.setdefault("n_personas", 0)  # how many persona field-groups the form renders
+st.session_state.setdefault("personas", [])  # list of {"name","fields"} dicts, edited in the main area
 # Persist the last-submitted query in the URL so it survives a mobile tab reload (no extra deps).
 _restored_q = st.query_params.get("q", "")
 
@@ -51,23 +51,8 @@ with st.sidebar:
     )
     modeled_base = st.checkbox("Modeled fan-out (no persona)", value=True,
                                help="An LLM's prediction of the fan-out for an anonymous searcher.")
-    # Add/remove buttons live OUTSIDE the form (forms can't hold non-submit buttons) and drive a count;
-    # the persona fields themselves render inside the main form, so they still commit on one Run tap.
-    st.markdown("**Modeled buyer personas**")
-    _pc1, _pc2 = st.columns(2)
-    if _pc1.button("➕ Add", type="primary", use_container_width=True,
-                   help="Add a buyer persona to model — its fields appear in the form."):
-        st.session_state.n_personas = min(10, st.session_state.n_personas + 1)
-    if _pc2.button("➖ Remove", use_container_width=True, disabled=st.session_state.n_personas == 0,
-                   help="Remove the last persona (clears its fields)."):
-        _last = st.session_state.n_personas - 1
-        st.session_state.pop(f"pname{_last}", None)
-        for _f in PERSONA_FIELDS:
-            st.session_state.pop(f"pf{_last}_{_f['key']}", None)
-        st.session_state.n_personas = max(0, _last)
-    n_personas_ui = st.session_state.n_personas
-    if n_personas_ui:
-        st.caption(f"{n_personas_ui} persona{'s' if n_personas_ui != 1 else ''} — fill the fields in the form below.")
+    modeled_personas = st.checkbox("Modeled fan-out (with personas)", value=False,
+                                   help="Predict the fan-out for specific buyer personas.")
     st.caption(f"Modeled fan-outs use {model.MODELS['gemini']}.")
     runs = int(st.number_input(
         "Runs per query", min_value=1, max_value=20, value=5,
@@ -76,7 +61,6 @@ with st.sidebar:
     do_patterns = not st.checkbox("Skip PATTERNS (free deterministic analysis)", value=False)
     do_briefs = not st.checkbox("Skip BRIEFS (the writer's brief)", value=False)
 
-    modeled_personas = n_personas_ui > 0
     _using_modeled = modeled_base or modeled_personas
     need_openai = do_briefs or ("openai" in elicited_engines) or (_using_modeled and model_engine == "openai")
     need_gemini = (do_patterns or do_briefs or ("gemini" in elicited_engines)
@@ -129,9 +113,10 @@ st.caption(
 st.caption("⚙️ Your API keys and run options are in the sidebar — on mobile, tap the ›› at the top-left to open it.")
 
 # ----------------------------------------------------------- cost estimate ----
+n_personas = len(st.session_state.personas) if modeled_personas else 0
 est = cost.estimate(
     n_queries=1, runs=runs, elicited_engines=elicited_engines,
-    modeled_base=modeled_base, n_personas=n_personas_ui, do_patterns=do_patterns, do_briefs=do_briefs,
+    modeled_base=modeled_base, n_personas=n_personas, do_patterns=do_patterns, do_briefs=do_briefs,
 )
 st.markdown(
     f'<div style="background:#f7f7f4; border-left:3px solid #557c63; padding:0.7rem 1rem; '
@@ -144,25 +129,31 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --------------------------------------------- query + personas (one form) ----
-# Text fields live in a form so a single Run tap commits them all at once — no per-field Enter
-# (which is unintuitive/unreliable on mobile). API keys live in their own sidebar form.
-with st.form("inputs"):
-    queries_text = st.text_area("Queries (one per line)", value=_restored_q, key="query_box", height=110,
-                                placeholder="what's the best way to get out of credit card debt?")
-    persona_inputs = []
-    if n_personas_ui > 0:
-        st.markdown("**Buyer personas** — same six fields each, so they stay comparable.")
-        for i in range(n_personas_ui):
-            st.markdown(f"*Persona {i + 1}*")
-            pname = st.text_input("Persona name", key=f"pname{i}")
-            pf = {f["key"]: st.text_input(f["label"], key=f"pf{i}_{f['key']}", help=f["help"],
-                                          placeholder=f.get("placeholder", "")) for f in PERSONA_FIELDS}
-            persona_inputs.append({"name": pname, "fields": pf})
-    submitted = st.form_submit_button("▶ Run", type="primary")
-
+# ----------------------------------------------------------------- inputs ----
+queries_text = st.text_area("Queries (one per line)", value=_restored_q, key="query_box", height=110,
+                            placeholder="what's the best way to get out of credit card debt?")
 queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
-personas = persona_inputs
+
+# --------------------------------------------------------------- personas ----
+if modeled_personas:
+    st.subheader("Buyer personas")
+    for idx, p in enumerate(st.session_state.personas):
+        with st.expander(f"Persona {idx + 1}: {p.get('name') or 'unnamed'}", expanded=True):
+            p["name"] = st.text_input("Persona name", value=p.get("name", ""), key=f"pname{idx}")
+            p.setdefault("fields", {})
+            for f in PERSONA_FIELDS:
+                p["fields"][f["key"]] = st.text_input(
+                    f["label"], value=p["fields"].get(f["key"], ""), help=f["help"],
+                    placeholder=f.get("placeholder", ""), key=f"p{idx}_{f['key']}",
+                )
+            if st.button("Remove this persona", key=f"prm{idx}"):
+                st.session_state.personas.pop(idx)
+                st.rerun()
+    if st.button("Add another persona", type="primary", icon=":material/add:"):
+        st.session_state.personas.append({"name": "", "fields": {}})
+        st.rerun()
+
+personas = st.session_state.personas if modeled_personas else []
 
 
 def _validate() -> list[str]:
@@ -177,7 +168,7 @@ def _validate() -> list[str]:
     if _using_modeled and not keys.get(model_engine):
         errs.append(f"Modeling needs the {model_engine} API key.")
     if modeled_personas and not any(assemble(p["fields"]) for p in personas):
-        errs.append("Fill in at least one persona (some fields), or set 'Modeled buyer personas' to 0.")
+        errs.append("Add at least one persona with some fields filled in, or uncheck 'Modeled fan-out (with personas)'.")
     if (do_patterns or do_briefs) and not keys.get("gemini"):
         errs.append("PATTERNS/BRIEFS need the Gemini key (for embeddings). Add it or skip both.")
     if do_briefs and not keys.get("openai"):
@@ -254,7 +245,7 @@ def _parallel(tasks, prog, start, end, expected_s):
 
 
 # -------------------------------------------------------------------- run ----
-if submitted:
+if st.button("▶ Run", type="primary"):
     # remember the submitted query in the URL (survives a reload); skip if too long for a URL
     _qjoined = "\n".join(queries)
     if queries and len(_qjoined) <= 1500:
