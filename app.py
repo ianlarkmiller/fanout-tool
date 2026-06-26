@@ -17,7 +17,6 @@ from core.persona_fields import PERSONA_FIELDS, assemble
 st.set_page_config(page_title="Query fan-out tool", layout="wide", initial_sidebar_state="expanded")
 
 # ---- session state ----
-st.session_state.setdefault("personas", [])
 st.session_state.setdefault("results", None)
 
 
@@ -29,48 +28,41 @@ def _slug(name: str, idx: int) -> str:
 
 
 ENGINE_DISPLAY = {"openai": "OpenAI", "gemini": "Gemini", "anthropic": "Anthropic"}
+model_engine = "gemini"  # modeling is fixed to the validated model (the prompt was tuned on Flash)
 
-# ---------------------------------------------------------------- sidebar ----
+# ----------------------------------------- sidebar: run options (stay live) ----
 with st.sidebar:
+    st.header("Run options")
     elicited_engines = st.multiselect(
         "Elicit live fan-outs from", ["openai", "gemini", "anthropic"], default=[],
         format_func=lambda e: f"{ENGINE_DISPLAY[e]} ({elicit.MODELS[e]})",
-        help="The real sub-queries each engine searches. Slower and pricier; needs that engine's key. "
-             "Each provider uses one fixed model (shown in the option).",
+        help="The real sub-queries each engine searches. Slower and pricier; needs that engine's key.",
     )
     modeled_base = st.checkbox("Modeled fan-out (no persona)", value=True,
                                help="An LLM's prediction of the fan-out for an anonymous searcher.")
-    modeled_personas = st.checkbox("Modeled fan-out (with personas)", value=False,
-                                   help="Predict the fan-out for specific buyer personas.")
-    model_engine = "gemini"  # modeling is fixed to the validated model (the prompt was tuned on Flash)
+    n_personas_ui = int(st.number_input(
+        "Modeled buyer personas", min_value=0, max_value=10, value=0,
+        help="How many buyer personas to model. Set above 0 to reveal persona fields in the form.",
+    ))
     st.caption(f"Modeled fan-outs use {model.MODELS['gemini']}.")
-
     runs = int(st.number_input(
         "Runs per query", min_value=1, max_value=20, value=5,
-        help="Each query is run this many times and the results pooled — a single fan-out is noisy. "
-             "5–10 is the sweet spot.",
+        help="Each query is run this many times and pooled — a single fan-out is noisy. 5–10 is the sweet spot.",
     ))
     do_patterns = not st.checkbox("Skip PATTERNS (free deterministic analysis)", value=False)
     do_briefs = not st.checkbox("Skip BRIEFS (the writer's brief)", value=False)
 
-    # Which keys are actually required given the current selections (drives the labels below).
-    _using_modeled = modeled_base or modeled_personas
-    need_openai = do_briefs or ("openai" in elicited_engines) or (_using_modeled and model_engine == "openai")
-    need_gemini = (do_patterns or do_briefs or ("gemini" in elicited_engines)
-                   or (_using_modeled and model_engine == "gemini"))
-    need_anthropic = ("anthropic" in elicited_engines) or (_using_modeled and model_engine == "anthropic")
+modeled_personas = n_personas_ui > 0
+_using_modeled = modeled_base or modeled_personas
+need_openai = do_briefs or ("openai" in elicited_engines) or (_using_modeled and model_engine == "openai")
+need_gemini = (do_patterns or do_briefs or ("gemini" in elicited_engines)
+               or (_using_modeled and model_engine == "gemini"))
+need_anthropic = ("anthropic" in elicited_engines) or (_using_modeled and model_engine == "anthropic")
 
-    st.header("API keys")
-    st.caption("Used in memory for this run only — never logged or stored.")
 
-    def _klabel(name: str, need: bool) -> str:
-        return f"{name} API key" + (" — required" if need else " — not needed for current selections")
+def _klabel(name: str, need: bool) -> str:
+    return f"{name} API key" + (" — required" if need else " — not needed for current selections")
 
-    openai_key = st.text_input(_klabel("OpenAI", need_openai), type="password")
-    gemini_key = st.text_input(_klabel("Google Gemini", need_gemini), type="password")
-    anthropic_key = st.text_input(_klabel("Anthropic", need_anthropic), type="password")
-
-keys = {"openai": openai_key, "gemini": gemini_key, "anthropic": anthropic_key}
 
 # ----------------------------------------------------------------- header ----
 st.title("Query fan-out tool")
@@ -90,52 +82,48 @@ st.caption(
     "pool repeated runs, and get a deterministic entity analysis + a writer's brief — every angle and "
     "source tagged by where it came from."
 )
-
-# ---------------------------------------------------------------- queries ----
-st.caption("⚙️ Your API keys and run options are in the sidebar — if it isn't visible, tap the ›› at the "
-           "top-left to open it.")
-
-queries_text = st.text_area("Queries (one per line)", height=110,
-                            placeholder="what's the best way to get out of credit card debt?")
-queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
-
-# --------------------------------------------------------------- personas ----
-if modeled_personas:
-    st.subheader("Buyer personas")
-    for idx, p in enumerate(st.session_state.personas):
-        with st.expander(f"Persona {idx + 1}: {p.get('name') or 'unnamed'}", expanded=True):
-            p["name"] = st.text_input("Persona name", value=p.get("name", ""), key=f"pname{idx}")
-            p.setdefault("fields", {})
-            for f in PERSONA_FIELDS:
-                p["fields"][f["key"]] = st.text_input(
-                    f["label"], value=p["fields"].get(f["key"], ""), help=f["help"],
-                    placeholder=f.get("placeholder", ""), key=f"p{idx}_{f['key']}",
-                )
-            if st.button("Remove this persona", key=f"prm{idx}"):
-                st.session_state.personas.pop(idx)
-                st.rerun()
-    if st.button("Add another persona", type="primary", icon=":material/add:"):
-        st.session_state.personas.append({"name": "", "fields": {}})
-        st.rerun()
-
-personas = st.session_state.personas if modeled_personas else []
+st.caption("⚙️ Engine & run options are in the sidebar — on mobile, tap the ›› at the top-left to open it.")
 
 # ----------------------------------------------------------- cost estimate ----
-n_personas = len(personas)
 est = cost.estimate(
-    n_queries=max(len(queries), 1), runs=runs, elicited_engines=elicited_engines,
-    modeled_base=modeled_base, n_personas=n_personas, do_patterns=do_patterns, do_briefs=do_briefs,
+    n_queries=1, runs=runs, elicited_engines=elicited_engines,
+    modeled_base=modeled_base, n_personas=n_personas_ui, do_patterns=do_patterns, do_briefs=do_briefs,
 )
 st.markdown(
     f'<div style="background:#f7f7f4; border-left:3px solid #557c63; padding:0.7rem 1rem; '
     f'border-radius:4px; margin:0.5rem 0; font-size:0.92rem;">'
-    f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f}</strong> for {max(len(queries), 1)} '
-    f'quer{"y" if max(len(queries), 1) == 1 else "ies"} &times; {runs} runs. '
-    f'This is a rough estimate of what the AI providers (OpenAI, Anthropic, Google) will charge to '
-    f'<strong>your own API keys</strong> for this run — the tool itself is free and never charges you anything.'
+    f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f} per query</strong> (× however many queries '
+    f'you enter), at {runs} runs each. This is a rough estimate of what the AI providers (OpenAI, '
+    f'Anthropic, Google) will charge to <strong>your own API keys</strong> — the tool itself is free '
+    f'and never charges you anything.'
     f'</div>',
     unsafe_allow_html=True,
 )
+
+# --------------------------------------------- inputs (one form → one Run tap) ----
+# Text fields live in a form so a single Run tap commits them all at once — no per-field Enter
+# (which is unintuitive/unreliable on mobile). Options + cost + key labels stay outside, so they're live.
+with st.form("inputs"):
+    st.markdown("**API keys** — used in memory for this run only; never logged or stored.")
+    openai_key = st.text_input(_klabel("OpenAI", need_openai), type="password")
+    gemini_key = st.text_input(_klabel("Google Gemini", need_gemini), type="password")
+    anthropic_key = st.text_input(_klabel("Anthropic", need_anthropic), type="password")
+    queries_text = st.text_area("Queries (one per line)", height=110,
+                                placeholder="what's the best way to get out of credit card debt?")
+    persona_inputs = []
+    if n_personas_ui > 0:
+        st.markdown("**Buyer personas** — same six fields each, so they stay comparable.")
+        for i in range(n_personas_ui):
+            st.markdown(f"*Persona {i + 1}*")
+            pname = st.text_input("Persona name", key=f"pname{i}")
+            pf = {f["key"]: st.text_input(f["label"], key=f"pf{i}_{f['key']}", help=f["help"],
+                                          placeholder=f.get("placeholder", "")) for f in PERSONA_FIELDS}
+            persona_inputs.append({"name": pname, "fields": pf})
+    submitted = st.form_submit_button("▶ Run", type="primary")
+
+keys = {"openai": openai_key, "gemini": gemini_key, "anthropic": anthropic_key}
+queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
+personas = persona_inputs
 
 
 def _validate() -> list[str]:
@@ -147,10 +135,10 @@ def _validate() -> list[str]:
     for e in elicited_engines:
         if not keys.get(e):
             errs.append(f"Elicited '{e}' needs the {e} API key.")
-    if (modeled_base or modeled_personas) and not keys.get(model_engine):
-        errs.append(f"Modeling with '{model_engine}' needs the {model_engine} API key.")
-    if modeled_personas and not any((p.get("fields") and assemble(p["fields"])) for p in personas):
-        errs.append("Add at least one persona with some fields filled in, or uncheck personas.")
+    if _using_modeled and not keys.get(model_engine):
+        errs.append(f"Modeling needs the {model_engine} API key.")
+    if modeled_personas and not any(assemble(p["fields"]) for p in personas):
+        errs.append("Fill in at least one persona (some fields), or set 'Modeled buyer personas' to 0.")
     if (do_patterns or do_briefs) and not keys.get("gemini"):
         errs.append("PATTERNS/BRIEFS need the Gemini key (for embeddings). Add it or skip both.")
     if do_briefs and not keys.get("openai"):
@@ -222,7 +210,7 @@ def _parallel(tasks, prog, start, end, expected_s):
 
 
 # -------------------------------------------------------------------- run ----
-if st.button("▶ Run", type="primary"):
+if submitted:
     errs = _validate()
     if errs:
         for e in errs:
