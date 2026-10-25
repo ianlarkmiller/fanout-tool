@@ -237,6 +237,8 @@ def brief(qid, prompt, group, gemini_api_key, openai_api_key, cache):
               "tag = elicited vs modeled):"]
         for i, c in sorted(shown, key=lambda ic: (PROV_RANK.get(ic[1]["prov"], 9), -ic[1]["cov"])):
             L.append(f"- **{cl.get(i, {}).get('label') or c['medoid']}** — [{provtag(c['prov'])}] _(raw: \"{c['medoid']}\")_")
+        if not shown and not folded:
+            L.append("- *(too few searches to group into angles at this run count — the brief is the named items below)*")
     else:
         L += ["", "**Angles to cover** (tier = how reliably engines probe it; tag = elicited vs modeled):"]
         for tname in ("Must", "Should", "Optional"):
@@ -290,9 +292,10 @@ def brief(qid, prompt, group, gemini_api_key, openai_api_key, cache):
         L.append(f"- [ ] A clear section answering: {m}")
     if commercial:
         L.append("- [ ] Build the comparison the engine is reconstructing (each item × the attributes it checks)")
-    L += ["- [ ] Name every entity above; cite the **[elicited]** / **[elicited+modeled]** ones to their source",
-          "- [ ] Cover persona-flagged predictions only if they fit your buyer",
-          "- [ ] Verify every claim against its source before publishing", ""]
+    L.append("- [ ] Name every entity above; cite the **[elicited]** / **[elicited+modeled]** ones to their source")
+    if has_personas:
+        L.append("- [ ] Cover persona-flagged predictions only if they fit your buyer")
+    L += ["- [ ] Verify every claim against its source before publishing", ""]
     return "\n".join(L)
 
 

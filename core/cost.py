@@ -1,8 +1,9 @@
 """Cost: provider prices + a pre-run estimate for the UI.
 
 PRICES are the per-token sheet (used later for exact post-run accounting). The pre-run `estimate()`
-uses MEASURED per-run averages from the source project's run-costs.md — more honest than guessing
-token counts before anything has run.
+uses MEASURED per-run averages (real token counts from real runs) priced at this sheet — more honest
+than guessing token counts before anything has run. It is an average, not a ceiling: a single run can
+cost noticeably more or less depending on the query (see the per-constant notes).
 """
 from __future__ import annotations
 
@@ -14,14 +15,22 @@ PRICES = {
     "embedding": 0.15,                                                    # gemini-embedding-001, per 1M tokens
 }
 
-# Measured per-RUN averages (run-costs.md, the 10-finance-query set, 10 runs each).
-ELICITED_PER_RUN = {"openai": 0.106, "gemini": 0.038, "anthropic": 0.096}
-MODELED_BASE_PER_RUN = 0.008      # base, no persona
-MODELED_PERSONA_PER_RUN = 0.011   # each persona
+# Measured per-RUN averages, re-derived 2026-10-24. The earlier figures (openai 0.106, gemini 0.038,
+# modeled 0.008/0.011, briefs 0.05) were priced on an older, cheaper rate sheet and left out Gemini's
+# thinking tokens, so real runs came in ~1.2-2.9x over the estimate. Sources:
+# - openai: the 100 saved finance-set runs (10 queries x 10) re-priced at this sheet ($0.139 of tokens)
+#   + ~2.4 web-search calls/run x $0.01 (measured 2026-10-24). Varies ~$0.06-0.27 by query.
+# - anthropic: the same 100 runs; already priced at this sheet (2026-10-24 runs came in lower, ~$0.06).
+# - gemini elicited + modeled: 2026-10-24 real runs with thinking tokens counted as output (15 elicited,
+#   15 base, 8 persona runs). The saved finance-set captures can't be re-used here: they never recorded
+#   thinking tokens.
+ELICITED_PER_RUN = {"openai": 0.16, "gemini": 0.054, "anthropic": 0.096}
+MODELED_BASE_PER_RUN = 0.017      # base, no persona
+MODELED_PERSONA_PER_RUN = 0.024   # each persona
 
 # Per-QUERY analysis costs (pooled across whatever sources were selected).
 PATTERNS_PER_QUERY = 0.001        # cold embeddings; ~free once cached within a session
-BRIEFS_PER_QUERY = 0.05           # typical; the widest pooled pages run up to ~0.15
+BRIEFS_PER_QUERY = 0.12           # mean of 107 real briefs at this sheet (98 article + 9 on 2026-10-24); ~$0.01-0.29
 
 # Rough per-step DURATIONS in seconds (measured 2026-06-25) — used to pace the progress bar so it
 # tracks the real work. elicit_run = one engine, one run; model_run = one modeled run.

@@ -100,7 +100,9 @@ def fanout_gemini(prompt: str, api_key: str) -> tuple[list[str], dict]:
         if gm and getattr(gm, "web_search_queries", None):
             queries.extend(q for q in gm.web_search_queries if q and q.strip())
     um = resp.usage_metadata
-    return queries, _usage(um, "prompt_token_count", "candidates_token_count", len(queries))
+    usage = _usage(um, "prompt_token_count", "candidates_token_count", len(queries))
+    usage["out"] += int(getattr(um, "thoughts_token_count", 0) or 0)  # thinking is billed as output
+    return queries, usage
 
 
 def _usage(obj, in_attr: str, out_attr: str, searches: int) -> dict:

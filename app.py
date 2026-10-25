@@ -7,6 +7,7 @@ persisted. See tool-build-plan.md for the build phases.
 import json
 import re
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, wait
 
 import streamlit as st
@@ -22,7 +23,7 @@ st.markdown('<style>[data-testid="InputInstructions"]{display:none;}</style>', u
 
 # ---- session state ----
 st.session_state.setdefault("results", None)
-st.session_state.setdefault("personas", [])  # list of {"name","fields"} dicts, edited in the main area
+st.session_state.setdefault("personas", [])  # list of {"id","name","fields"} dicts, edited in the main area
 # Persist the last-submitted query in the URL so it survives a mobile tab reload (no extra deps).
 _restored_q = st.query_params.get("q", "")
 
@@ -113,21 +114,8 @@ st.caption(
 st.caption("⚙️ Your API keys and run options are in the sidebar — if it isn't visible, tap the ›› at the top-left to open it.")
 
 # ----------------------------------------------------------- cost estimate ----
-n_personas = len(st.session_state.personas) if modeled_personas else 0
-est = cost.estimate(
-    n_queries=1, runs=runs, elicited_engines=elicited_engines,
-    modeled_base=modeled_base, n_personas=n_personas, do_patterns=do_patterns, do_briefs=do_briefs,
-)
-st.markdown(
-    f'<div style="background:#f7f7f4; border-left:3px solid #557c63; padding:0.7rem 1rem; '
-    f'border-radius:4px; margin:0.5rem 0; font-size:0.92rem;">'
-    f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f} per query</strong>, at {runs} runs each '
-    f'(~&#36;{est["total"] / runs:.2f} per run). This is a rough estimate of what the AI providers (OpenAI, '
-    f'Anthropic, Google) will charge to <strong>your own API keys</strong> — the tool itself is free '
-    f'and never charges you anything.'
-    f'</div>',
-    unsafe_allow_html=True,
-)
+# Filled in below, after the persona widgets have run, so it counts this rerun's persona edits.
+cost_box = st.empty()
 
 # ----------------------------------------------------------------- inputs ----
 queries_text = st.text_area("Queries (one per line)", value=_restored_q, key="query_box", height=110,
@@ -138,22 +126,43 @@ queries = [q.strip() for q in queries_text.splitlines() if q.strip()]
 if modeled_personas:
     st.subheader("Buyer personas")
     for idx, p in enumerate(st.session_state.personas):
+        # Widgets are keyed by the persona's own stable id, not its list position — otherwise removing
+        # persona 1 hands persona 2's slot the removed persona's leftover widget values.
+        pid = p.setdefault("id", uuid.uuid4().hex[:8])
         with st.expander(f"Persona {idx + 1}: {p.get('name') or 'unnamed'}", expanded=True):
-            p["name"] = st.text_input("Persona name", value=p.get("name", ""), key=f"pname{idx}")
+            p["name"] = st.text_input("Persona name", value=p.get("name", ""), key=f"pname_{pid}")
             p.setdefault("fields", {})
             for f in PERSONA_FIELDS:
                 p["fields"][f["key"]] = st.text_input(
                     f["label"], value=p["fields"].get(f["key"], ""), help=f["help"],
-                    placeholder=f.get("placeholder", ""), key=f"p{idx}_{f['key']}",
+                    placeholder=f.get("placeholder", ""), key=f"p_{pid}_{f['key']}",
                 )
-            if st.button("Remove this persona", key=f"prm{idx}"):
+            if st.button("Remove this persona", key=f"prm_{pid}"):
                 st.session_state.personas.pop(idx)
                 st.rerun()
     if st.button("Add another persona", type="primary", icon=":material/add:"):
-        st.session_state.personas.append({"name": "", "fields": {}})
+        st.session_state.personas.append({"id": uuid.uuid4().hex[:8], "name": "", "fields": {}})
         st.rerun()
 
 personas = st.session_state.personas if modeled_personas else []
+
+# Count only personas the run will actually use (it skips ones with no fields filled in).
+n_personas = sum(1 for p in personas if assemble(p.get("fields", {})))
+est = cost.estimate(
+    n_queries=1, runs=runs, elicited_engines=elicited_engines,
+    modeled_base=modeled_base, n_personas=n_personas, do_patterns=do_patterns, do_briefs=do_briefs,
+)
+cost_box.markdown(
+    f'<div style="background:#f7f7f4; border-left:3px solid #557c63; padding:0.7rem 1rem; '
+    f'border-radius:4px; margin:0.5rem 0; font-size:0.92rem;">'
+    f'<strong>Estimated API cost: ~&#36;{est["total"]:.2f} per query</strong>, at {runs} '
+    f'run{"" if runs == 1 else "s"} each '
+    f'(~&#36;{est["total"] / runs:.2f} per run). This is a rough estimate of what the AI providers (OpenAI, '
+    f'Anthropic, Google) will charge to <strong>your own API keys</strong> — the tool itself is free '
+    f'and never charges you anything.'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 
 def _validate() -> list[str]:
@@ -210,6 +219,13 @@ def _run_warnings(label: str, runs_list: list) -> None:
     else:
         st.warning(f"⚠️ {label}: {len(errs)} of {total} run(s) failed — {_friendly(errs[0])} "
                    f"(kept the {ok} that worked)")
+
+
+def _empty_warning(label: str, runs_list: list, field: str, what: str) -> None:
+    """Surface a warning if every run that succeeded came back with nothing to analyze."""
+    ok = [r for r in runs_list if "error" not in r]
+    if ok and not any(r.get(field) for r in ok):
+        st.warning(f"⚠️ {label}: {what} on all {len(ok)} run(s) — no fan-out to analyze from this source.")
 
 
 def _parallel(tasks, prog, start, end, expected_s):
@@ -283,13 +299,22 @@ if st.button("▶ Run", type="primary"):
                                        lambda q=q: model.model_one(q, None, model_engine, runs,
                                                                    keys[model_engine], None)))
                     if modeled_personas:
+                        used_labels = set()
                         for idx, p in enumerate(personas):
                             ptext = assemble(p.get("fields", {}))
                             if not ptext:
                                 continue
                             nm = p.get("name") or idx + 1
                             label = _slug(p.get("name", ""), idx)
-                            ctasks.append((f"persona '{nm}'",
+                            tkey = f"persona '{nm}'"
+                            if label in used_labels:  # two personas with the same name stay two sources
+                                n = 2
+                                while f"{label}-{n}" in used_labels:
+                                    n += 1
+                                label = f"{label}-{n}"
+                                tkey = f"persona '{nm}' ({label})"  # task keys must be unique too
+                            used_labels.add(label)
+                            ctasks.append((tkey,
                                            lambda q=q, ptext=ptext, label=label: model.model_one(
                                                q, ptext, model_engine, runs, keys[model_engine], label)))
                     if ctasks:
@@ -308,11 +333,14 @@ if st.button("▶ Run", type="primary"):
                         if key == "elicited":
                             for eng, rec in cap["engines"].items():
                                 _run_warnings(f"{ENGINE_DISPLAY.get(eng, eng)} elicitation", rec["runs"])
+                                _empty_warning(f"{ENGINE_DISPLAY.get(eng, eng)} elicitation", rec["runs"],
+                                               "queries", "answered without searching the web")
                                 if any(r.get("truncated") for r in rec["runs"]):
                                     st.warning(f"⚠️ {ENGINE_DISPLAY.get(eng, eng)} hit its search cap on some "
                                                f"runs — fan-out may be truncated.")
                         else:
                             _run_warnings(key, cap["result"]["runs"])
+                            _empty_warning(key, cap["result"]["runs"], "sub_queries", "returned no sub-queries")
                     # ---- analysis phase: PATTERNS + BRIEFS concurrent (each its own embed cache) ----
                     has_data = any(
                         ("engines" in c and any(r.get("queries") for rec in c["engines"].values()
@@ -320,8 +348,8 @@ if st.button("▶ Run", type="primary"):
                         or ("result" in c and any(r.get("sub_queries") for r in c["result"]["runs"]))
                         for c in caps)
                     if (do_patterns or do_briefs) and not has_data:
-                        st.error(f"❌ No fan-outs were captured for “{q}” — every selected source failed "
-                                 f"(see the warnings above), so there's nothing to analyze. Check your keys/credits.")
+                        st.error(f"❌ No fan-outs were captured for “{q}” — no selected source returned any "
+                                 f"searches (see the warnings above), so there's nothing to analyze.")
                     atasks = []
                     if has_data and do_patterns:
                         atasks.append(("patterns",
@@ -331,14 +359,25 @@ if st.button("▶ Run", type="primary"):
                                        lambda q=q, caps=caps: brief.brief_md(q, caps, keys["gemini"],
                                                                              keys["openai"], {})))
                     if atasks:
-                        st.write("  · generating PATTERNS + BRIEFS in parallel…")
+                        _names = " + ".join({"patterns": "PATTERNS", "brief": "BRIEFS"}[k] for k, _ in atasks)
+                        st.write(f"  · generating {_names}" + (" in parallel…" if len(atasks) > 1 else "…"))
                     ares, aerr = _parallel(atasks, prog, cap_end, q_end, analysis_wall)
                     if "patterns" in aerr:
                         st.error(f"❌ PATTERNS failed for “{q}” — {_friendly(aerr['patterns'])}")
                     if "brief" in aerr:
                         st.error(f"❌ BRIEFS failed for “{q}” — {_friendly(aerr['brief'])}")
+                    def _stage(name, wanted):  # what the results tab says when a stage has no output
+                        if not wanted:
+                            return "was skipped."
+                        if not has_data:
+                            return "didn't run — no fan-outs were captured for this query."
+                        if name in aerr:
+                            return f"failed — {_friendly(aerr[name]).rstrip('.')}."
+                        return ""
                     results.append({"query": q, "captures": caps,
-                                    "patterns": ares.get("patterns"), "brief": ares.get("brief")})
+                                    "patterns": ares.get("patterns"), "brief": ares.get("brief"),
+                                    "patterns_note": _stage("patterns", do_patterns),
+                                    "brief_note": _stage("brief", do_briefs)})
                 except Exception as exc:  # noqa: BLE001 — backstop so one query can't kill the whole run
                     st.error(f"❌ “{q}” failed — {_friendly(exc)}")
                 prog.progress(q_end)  # always sync the bar to the query boundary, whatever happened
@@ -359,14 +398,14 @@ if results:
                 st.download_button("Download brief (.md)", r["brief"],
                                    file_name="brief.md", key=f"dlb_{ri}")
             else:
-                st.caption("BRIEFS was skipped.")
+                st.caption("BRIEFS " + (r.get("brief_note") or "was skipped."))
         with tabs[1]:
             if r["patterns"]:
                 st.markdown(r["patterns"])
                 st.download_button("Download patterns (.md)", r["patterns"],
                                    file_name="patterns.md", key=f"dlp_{ri}")
             else:
-                st.caption("PATTERNS was skipped.")
+                st.caption("PATTERNS " + (r.get("patterns_note") or "was skipped."))
         elicited_caps = [c for c in r["captures"] if "engines" in c]
         modeled_caps = [c for c in r["captures"] if "result" in c]
         with tabs[2]:

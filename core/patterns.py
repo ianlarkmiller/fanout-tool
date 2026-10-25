@@ -198,6 +198,9 @@ def persona_of(data: dict) -> str:
     pf = data.get("persona_file")
     if not pf:
         return "base"
+    if not (pf.endswith(".md") or "/" in pf or "\\" in pf):
+        return pf  # in-memory label from the app (already a unique slug) — keep it whole
+    # file-based capture: "personas/debt-david.md" -> "david" (drop the topic prefix)
     return re.sub(r"\.md$", "", os.path.basename(pf)).split("-")[-1]
 
 
@@ -295,10 +298,10 @@ def entity_spine(group, sruns, prompt=""):
         er = any(s.startswith("elicited") for s in present)
         mr = any(s.startswith("modeled") for s in present)
         prov = "real+guess" if er and mr else "real" if er else "guess" if mr else "weak"
-        n_pers_rel = sum(1 for s in reliable if s.startswith("modeled"))
+        n_pers_rel = sum(1 for s in reliable if s.startswith("modeled:") and s != "modeled:base")
         rows.append({"entity": c, "tier": tier, "reliable": set(reliable), "prov": prov,
                      "rclasses": len(rclasses), "stat": stat, "lowconf": best_w < CONF_W,
-                     "n_pers_rel": n_pers_rel})
+                     "n_pers_rel": n_pers_rel, "base_rel": "modeled:base" in reliable})
     order = {"Must": 0, "Should": 1, "Optional": 2}
     rows.sort(key=lambda r: (order[r["tier"]], -r["rclasses"], -max(w for (_, _, w) in r["stat"].values())))
     return rows
@@ -377,12 +380,18 @@ def report(qid, prompt, group, api_key, cache):
     header = f'# Unified fan-out analysis — {qid}: "{prompt}"' if qid else f'# Unified fan-out analysis — "{prompt}"'
     L = [header, "",
          "## Source-class manifest", f"- provenance: **{prov}**"]
-    if has_e and len(elic_contrib) <= 1:
-        only = (next(iter(elic_contrib)).split(":")[1] if elic_contrib else "none")
-        L.append(f"- ⚠ only **{len(elic_contrib)}** elicited engine fanned out to entities ({only}); the "
-                 f"others were anchor-only — so the 'elicited' signal here is effectively single-engine.")
+    elic_srcs = [s for s in classes if s.startswith("elicited")]
+    if has_e and not elic_contrib:
+        L.append("- ⚠ no elicited engine named any entities in its searches — any entities below come from "
+                 "the modeled sources only.")
+    elif len(elic_srcs) >= 2 and len(elic_contrib) == 1:
+        only = next(iter(elic_contrib)).split(":")[1]
+        rest = ", ".join(s.split(":")[1] for s in elic_srcs if s not in elic_contrib)
+        L.append(f"- ⚠ only **1** of the {len(elic_srcs)} elicited engines named entities in its searches "
+                 f"({only}); the others ({rest}) searched without naming any — so the 'elicited' entity "
+                 f"signal here is effectively single-engine.")
     for s in classes:
-        L.append(f"- {s} — {sruns[s]} runs")
+        L.append(f"- {s} — {sruns[s]} run{'' if sruns[s] == 1 else 's'}")
     L += ["", "## Entity spine (primary signal; ✓ = reliable in that source, Wilson LB ≥ "
           f"{RELIABLE_W}; the \"reliably searched by N sources\" count = independent sources that reliably "
           "search it — each engine counts once, all modeled personas as one (up to 4 with everything pooled); "
@@ -395,7 +404,8 @@ def report(qid, prompt, group, api_key, cache):
         L.append(f"\n**{tier}** (showing {len(shown)} of {len(ts)})")
         for r in shown:
             pers = f" · {r['n_pers_rel']} persona(s)" if r["prov"] in ("guess", "real+guess") and r["n_pers_rel"] else ""
-            flag = ("  ⚠" if r["lowconf"] else "") + ("  ⚑1-persona" if r["prov"] == "guess" and r["n_pers_rel"] == 1 else "")
+            flag = ("  ⚠" if r["lowconf"] else "") + ("  ⚑1-persona" if r["prov"] == "guess" and r["n_pers_rel"] == 1
+                                                      and not r["base_rel"] else "")
             L.append(f"- [{provtag(r['prov'])}] `{r['entity']}` — {rclass_phrase(r['rclasses'])} "
                      f"[{fmt_sources(r['stat'], r['reliable'])}]{pers}{flag}")
     d = clustering_diagnostic(group, api_key, cache)

@@ -73,7 +73,8 @@ def call_gemini(prompt: str, api_key: str) -> tuple[dict, dict]:
     )
     um = resp.usage_metadata
     usage = {"in": int(getattr(um, "prompt_token_count", 0) or 0),
-             "out": int(getattr(um, "candidates_token_count", 0) or 0)}
+             "out": int(getattr(um, "candidates_token_count", 0) or 0)
+                    + int(getattr(um, "thoughts_token_count", 0) or 0)}  # thinking is billed as output
     return _extract_json(resp.text or ""), usage
 
 
@@ -133,9 +134,11 @@ def model_one(query: str, persona: str | None, engine: str, runs: int, api_key: 
         except Exception as exc:  # noqa: BLE001 — record and continue
             return {"run": i, "error": f"{type(exc).__name__}: {exc}"}
         c = cost(engine, usage)
-        subs = data.get("sub_queries", []) if isinstance(data, dict) else []
+        if not isinstance(data, dict):
+            return {"run": i, "error": f"the model returned a JSON {type(data).__name__}, not the expected object",
+                    **usage, "cost_usd": round(c, 6)}
         return {"run": i, "persona_reading": data.get("persona_reading", ""),
-                "sub_queries": subs, **usage, "cost_usd": round(c, 6)}
+                "sub_queries": data.get("sub_queries", []), **usage, "cost_usd": round(c, 6)}
 
     with ThreadPoolExecutor(max_workers=max(runs, 1)) as ex:
         runs_list = list(ex.map(_one, range(1, runs + 1)))  # ex.map preserves run order
