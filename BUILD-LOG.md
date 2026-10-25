@@ -72,6 +72,29 @@ Remaining:
 3. Error-handling polish (invalid keys, API failures, quota) surfaced in the UI.
 4. Drop the live link into the article where the tool is teased.
 
+## 2026-10-24 — Bug fixes from the headless test
+
+A headless test (report: job-search repo, `projects/article-pipeline/real-vs-guessed-fanouts/tool-test-2026-10-24.md`)
+found persona, labeling and cost-estimate bugs. Fixed:
+- **Personas whose names share a last word merged into one source** ("First-time buyer" + "Repeat buyer" →
+  `buyer`). `patterns.persona_of` now keeps the app's in-memory label whole (the last-word split is only for
+  file-based captures). Two personas with the *same* name now get unique labels (`buyer`, `buyer-2`).
+- **"Remove this persona" deleted the wrong persona's data** (it removed the last one). Persona widgets are now
+  keyed by a stable per-persona id instead of list position.
+- **PATTERNS counted the no-persona base run as a persona** ("· 1 persona(s) ⚑1-persona" on base-only runs).
+  The count now excludes base, and ⚑1-persona only fires when one persona, and not base, supports the entity.
+- **Cost estimate ran ~1.2–2.9× low.** The measured averages had been priced on an older, cheaper rate sheet,
+  and Gemini's thinking tokens were never counted. Gemini usage now counts thinking as output, so the per-run
+  `cost_usd` in the raw downloads is correct too. The per-run averages are re-derived at the current sheet
+  (see `core/cost.py`), and empty personas are no longer charged.
+- Wording: a failed PATTERNS/BRIEFS now says "failed — reason" (not "was skipped"); the status line names
+  only the stages that run; PATTERNS' single-engine warning fixed for the one-engine and zero-entity cases; brief
+  fixes (empty "Angles to cover", persona checklist item with no personas); a non-object model reply is a clean
+  per-run error; an engine that never searched gets its own warning; "1 run" grammar.
+
+Validated offline with fake providers (25 bug checks that failed before the fix and pass after, 6 control
+checks that pass both times, plus the 28-case regression suite) and one real end-to-end run (~$0.45). **Committed locally; not yet pushed or deployed.**
+
 ## Run locally
 
 ```
